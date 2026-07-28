@@ -1,0 +1,4 @@
+name: projects/${var.project_id}/policies/custom.${var.prefix}EnforceReasoningEngineAgentGatewayConfig
+spec:
+  rules:
+  - enforce: true

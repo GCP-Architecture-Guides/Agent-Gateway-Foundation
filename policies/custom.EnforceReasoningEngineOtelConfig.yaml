@@ -1,0 +1,10 @@
+name: organizations/${var.organization_id}/customConstraints/custom.${var.prefix}EnforceReasoningEngineOtelConfig
+resourceTypes:
+- aiplatform.googleapis.com/ReasoningEngine
+methodTypes:
+- CREATE
+- UPDATE
+condition: "has(resource.spec.deploymentSpec.env) && resource.spec.deploymentSpec.env.exists(e, e.name == \"GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY\") && resource.spec.deploymentSpec.env.exists(e, e.name == \"agent_name\") && resource.spec.deploymentSpec.env.exists(e, e.name == \"agent_description\") && resource.spec.deploymentSpec.env.exists(e, e.name == \"agent_department\") && resource.spec.deploymentSpec.env.exists(e, e.name == \"agent_team\") && resource.spec.deploymentSpec.env.exists(e, e.name == \"agent_role\")"
+actionType: ALLOW
+displayName: "${var.prefix} - Enforce Otel Config with Tags for Reasoning Engines"
+description: "Ensures Reasoning Engines deploy with OpenTelemetry and required organizational metadata tags."

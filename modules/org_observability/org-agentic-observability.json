@@ -1,0 +1,212 @@
+{
+  "displayName": "Org Agentic Observability",
+  "description": "Cross-project Vertex Gemini token usage (metrics scope hub: __SCOPE_PROJECT_ID__). Native metrics only — no central log sink.",
+  "labels": {},
+  "mosaicLayout": {
+    "columns": 48,
+    "tiles": [
+      {
+        "xPos": 0,
+        "yPos": 0,
+        "height": 10,
+        "width": 48,
+        "widget": {
+          "title": "Org view — scope & drill-down",
+          "text": {
+            "format": "MARKDOWN",
+            "content": "**Metrics scope hub:** `__SCOPE_PROJECT_ID__`\n\n**Projects in scope:** __MONITORED_PROJECTS_SUMMARY__\n\nThis dashboard aggregates **native Vertex** `token_count` across all projects in the hub metrics scope. Per-agent charts, log panels, and gateway SQL widgets stay on **project dashboards** until a central log sink is added.\n\n**Project dashboards**\n__PROJECT_DRILLDOWN_LINKS__\n\nMetric: `aiplatform.googleapis.com/publisher/online_serving/token_count` · grouped by `resource.project_id`"
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 10,
+        "height": 18,
+        "width": 48,
+        "widget": {
+          "title": "Total tokens by project (15 min)",
+          "xyChart": {
+            "chartOptions": {
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "STACKED_BAR",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\"",
+                    "aggregation": {
+                      "alignmentPeriod": "900s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "resource.project_id"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "yAxis": {
+              "label": "Tokens",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 28,
+        "height": 8,
+        "width": 16,
+        "widget": {
+          "title": "Total tokens — 7 days (all scoped projects)",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\"",
+                "aggregation": {
+                  "alignmentPeriod": "604800s",
+                  "perSeriesAligner": "ALIGN_DELTA",
+                  "crossSeriesReducer": "REDUCE_SUM",
+                  "groupByFields": []
+                }
+              },
+              "outputFullDuration": true
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 16,
+        "yPos": 28,
+        "height": 8,
+        "width": 16,
+        "widget": {
+          "title": "Input tokens — 7 days",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\" metric.label.type=\"input\"",
+                "aggregation": {
+                  "alignmentPeriod": "604800s",
+                  "perSeriesAligner": "ALIGN_DELTA",
+                  "crossSeriesReducer": "REDUCE_SUM",
+                  "groupByFields": []
+                }
+              },
+              "outputFullDuration": true
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 32,
+        "yPos": 28,
+        "height": 8,
+        "width": 16,
+        "widget": {
+          "title": "Output tokens — 7 days",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\" metric.label.type=\"output\"",
+                "aggregation": {
+                  "alignmentPeriod": "604800s",
+                  "perSeriesAligner": "ALIGN_DELTA",
+                  "crossSeriesReducer": "REDUCE_SUM",
+                  "groupByFields": []
+                }
+              },
+              "outputFullDuration": true
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 36,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Input tokens by project (15 min)",
+          "xyChart": {
+            "chartOptions": {
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\" metric.label.type=\"input\"",
+                    "aggregation": {
+                      "alignmentPeriod": "900s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "resource.project_id"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "yAxis": {
+              "label": "Input tokens",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 36,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Output tokens by project (15 min)",
+          "xyChart": {
+            "chartOptions": {
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\" metric.label.type=\"output\"",
+                    "aggregation": {
+                      "alignmentPeriod": "900s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "resource.project_id"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "yAxis": {
+              "label": "Output tokens",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+# ===========================================================================
+# RE Container Requirements — CRITICAL: All primary packages MUST be pinned
+# ===========================================================================
+# The RE container runs `pip install -r requirements.txt` at startup,
+# independently of the local deploy .venv.
+#
+# Pinning rules:
+#   - Pin top-level packages to == for reproducibility.
+#   - Do NOT add transitive deps (google-genai, pydantic, etc.) — let pip
+#     resolve them. Adding a wrong version constraint blocks the build.
+#   - If you see "Build failed / requirements.txt" errors, first check that
+#     you haven't accidentally pinned a transitive dep too tightly.
+#
+# Why these exact versions?
+#   - google-adk==1.31.1: last version whose Agent Pydantic model accepts
+#     a BaseLlm object (GlobalGemini instance) as the 'model' field.
+#     Newer ADK versions changed model to str-only → ValidationError on startup.
+#   - google-cloud-aiplatform==1.149.0: last version that uses AuthorizedSession
+#     HTTP transport for CreateReasoningEngine. Newer versions switched to
+#     agentplatform.Client which bypasses the .pth org-policy patch interceptors.
+#
+# See KNOWN_ISSUES.md #008 for full root cause, symptoms, and upgrade guidance.
+# ===========================================================================
+
+# Core ADK runtime — GatewayAgent, Agent, Gemini, AdkApp, ASGI server
+# WARNING: Do NOT upgrade without testing the .pth patch still intercepts.
+google-adk==1.31.1
+
+# Vertex AI SDK — ReasoningEngine, AdkApp hosting, staging bucket
+# WARNING: Do NOT upgrade without verifying AuthorizedSession transport is used.
+google-cloud-aiplatform[adk,agent_engines]==1.149.0
+
+# HTTP client — used by fetch_url tool in agent.py
+requests>=2.31.0,<3.0.0

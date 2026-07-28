@@ -1,0 +1,10 @@
+name: organizations/${var.organization_id}/customConstraints/custom.${var.prefix}EnforceReasoningEngineAgentGatewayConfig
+resourceTypes:
+- aiplatform.googleapis.com/ReasoningEngine
+methodTypes:
+- CREATE
+- UPDATE
+condition: "has(resource.spec.deploymentSpec.agentGatewayConfig.agentToAnywhereConfig)"
+actionType: ALLOW
+displayName: "${var.prefix} - Enforce Agent Gateway Config for Reasoning Engines"
+description: "Ensures Reasoning Engine deployments use the configured Agent Gateway."

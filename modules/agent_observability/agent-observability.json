@@ -1,0 +1,717 @@
+{
+  "displayName": "Agent Observability",
+  "description": "AI token usage: project-level (native metrics) and per-agent (llm_usage log metrics). Flat mosaic layout matching Agent Gateway Observability.",
+  "labels": {},
+  "dashboardFilters": [
+    {
+      "filterType": "VALUE_ONLY",
+      "labelKey": "",
+      "templateVariable": "agent_id",
+      "timeSeriesQuery": {
+        "opsAnalyticsQuery": {
+          "savedQueryId": "",
+          "sql": "SELECT DISTINCT JSON_VALUE(json_payload.agent_id) AS agent_id FROM `agentic-ai-lens-placeholder.global._Default._AllLogs` WHERE resource.type = 'aiplatform.googleapis.com/ReasoningEngine' AND JSON_VALUE(json_payload.event) = 'llm_usage' AND JSON_VALUE(json_payload.agent_id) IS NOT NULL ORDER BY agent_id"
+        },
+        "outputFullDuration": false,
+        "unitOverride": ""
+      },
+      "valueType": "STRING"
+    },
+    {
+      "filterType": "VALUE_ONLY",
+      "labelKey": "",
+      "templateVariable": "department",
+      "timeSeriesQuery": {
+        "opsAnalyticsQuery": {
+          "savedQueryId": "",
+          "sql": "SELECT DISTINCT JSON_VALUE(json_payload.department) AS department FROM `agentic-ai-lens-placeholder.global._Default._AllLogs` WHERE resource.type = 'aiplatform.googleapis.com/ReasoningEngine' AND JSON_VALUE(json_payload.event) = 'llm_usage' AND JSON_VALUE(json_payload.department) IS NOT NULL ORDER BY department"
+        },
+        "outputFullDuration": false,
+        "unitOverride": ""
+      },
+      "valueType": "STRING"
+    },
+    {
+      "filterType": "VALUE_ONLY",
+      "labelKey": "",
+      "templateVariable": "agent_role",
+      "timeSeriesQuery": {
+        "opsAnalyticsQuery": {
+          "savedQueryId": "",
+          "sql": "SELECT DISTINCT JSON_VALUE(json_payload.agent_role) AS agent_role FROM `agentic-ai-lens-placeholder.global._Default._AllLogs` WHERE resource.type = 'aiplatform.googleapis.com/ReasoningEngine' AND JSON_VALUE(json_payload.event) = 'llm_usage' AND JSON_VALUE(json_payload.agent_role) IS NOT NULL ORDER BY agent_role"
+        },
+        "outputFullDuration": false,
+        "unitOverride": ""
+      },
+      "valueType": "STRING"
+    }
+  ],
+  "mosaicLayout": {
+    "columns": 48,
+    "tiles": [
+      {
+        "xPos": 0,
+        "yPos": 0,
+        "height": 12,
+        "width": 48,
+        "widget": {
+          "title": "Open token alert incidents (AL8)",
+          "incidentList": {
+            "monitoredResources": [],
+            "policyNames": __ALERT_POLICY_NAMES__
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 12,
+        "height": 4,
+        "width": 48,
+        "widget": {
+          "title": "Alert policies & runbook (AL9)",
+          "text": {
+            "content": "**Token alerts:** AL1 baseline spike · AL2 runaway loop · AL3 project surge · AL4 absolute ceiling · AL5 error + tokens · AL6 zero traffic (optional)\n\n- [Alert policies](https://console.cloud.google.com/monitoring/alerting/policies?project=agentic-ai-lens-placeholder)\n- [Logs — llm_usage](https://console.cloud.google.com/logs/query;query=resource.type%3D%22aiplatform.googleapis.com%2FReasoningEngine%22%0AjsonPayload.event%3D%22llm_usage%22;duration=PT1H?project=agentic-ai-lens-placeholder)\n- [Instrumentation spec](https://github.com/) — see `docs/agent-instrumentation-spec.md` in agw-observability\n\nFilter **@agent_id**, **@department**, or **@agent_role** below to focus Agents widgets and log panels.",
+            "format": "MARKDOWN"
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 16,
+        "height": 8,
+        "width": 16,
+        "widget": {
+          "title": "Total tokens — 7 days (P4)",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\"",
+                "aggregation": {
+                  "alignmentPeriod": "604800s",
+                  "perSeriesAligner": "ALIGN_DELTA",
+                  "crossSeriesReducer": "REDUCE_SUM",
+                  "groupByFields": []
+                }
+              },
+              "outputFullDuration": true
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 16,
+        "yPos": 16,
+        "height": 8,
+        "width": 16,
+        "widget": {
+          "title": "Input tokens — 7 days (P4)",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\" metric.label.type=\"input\"",
+                "aggregation": {
+                  "alignmentPeriod": "604800s",
+                  "perSeriesAligner": "ALIGN_DELTA",
+                  "crossSeriesReducer": "REDUCE_SUM",
+                  "groupByFields": []
+                }
+              },
+              "outputFullDuration": true
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 32,
+        "yPos": 16,
+        "height": 8,
+        "width": 16,
+        "widget": {
+          "title": "Output tokens — 7 days (P4)",
+          "scorecard": {
+            "timeSeriesQuery": {
+              "timeSeriesFilter": {
+                "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\" metric.label.type=\"output\"",
+                "aggregation": {
+                  "alignmentPeriod": "604800s",
+                  "perSeriesAligner": "ALIGN_DELTA",
+                  "crossSeriesReducer": "REDUCE_SUM",
+                  "groupByFields": []
+                }
+              },
+              "outputFullDuration": true
+            },
+            "sparkChartView": {
+              "sparkChartType": "SPARK_LINE"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 24,
+        "height": 12,
+        "width": 24,
+        "widget": {
+          "title": "Model mix by tokens (P5)",
+          "pieChart": {
+            "chartType": "DONUT",
+            "dataSets": [
+              {
+                "minAlignmentPeriod": "86400s",
+                "timeSeriesQuery": {
+                  "outputFullDuration": true,
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\"",
+                    "aggregation": {
+                      "alignmentPeriod": "86400s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "resource.label.model_user_id"
+                      ]
+                    }
+                  }
+                },
+                "sliceNameTemplate": "${resource.labels.model_user_id}"
+              }
+            ],
+            "showLabels": true
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 24,
+        "height": 12,
+        "width": 24,
+        "widget": {
+          "title": "Project — related views",
+          "text": {
+            "content": "**Project-level Gemini tokens** (all Vertex usage in this project, not Lens-only).\n\n- [Vertex AI — Model observability](https://console.cloud.google.com/vertex-ai/dashboard?project=agentic-ai-lens-placeholder)\n- [Cloud Billing — Reports](https://console.cloud.google.com/billing/reports?project=agentic-ai-lens-placeholder)\n- [Metrics Explorer — token_count](https://console.cloud.google.com/monitoring/metrics-explorer?project=agentic-ai-lens-placeholder)\n\nNative metric: `aiplatform.googleapis.com/publisher/online_serving/token_count` · 15-minute buckets",
+            "format": "MARKDOWN"
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 36,
+        "height": 4,
+        "width": 48,
+        "widget": {
+          "title": "Project — 15-minute charts",
+          "text": {
+            "content": "Chart pairs with Vertex serving logs below (Gateway Observability layout).",
+            "format": "MARKDOWN"
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 40,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Total tokens (15 min)",
+          "xyChart": {
+            "chartOptions": {
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "STACKED_BAR",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\"",
+                    "aggregation": {
+                      "alignmentPeriod": "900s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": []
+                    }
+                  }
+                }
+              }
+            ],
+            "yAxis": {
+              "label": "Tokens",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 40,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Input tokens (15 min)",
+          "xyChart": {
+            "chartOptions": {
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "STACKED_BAR",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\" metric.label.type=\"input\"",
+                    "aggregation": {
+                      "alignmentPeriod": "900s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": []
+                    }
+                  }
+                }
+              }
+            ],
+            "yAxis": {
+              "label": "Input tokens",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 58,
+        "height": 16,
+        "width": 24,
+        "widget": {
+          "title": "Total tokens: Vertex serving log events",
+          "logsPanel": {
+            "filter": "protoPayload.serviceName=\"aiplatform.googleapis.com\"\n(protoPayload.methodName=~\"GenerateContent\" OR protoPayload.methodName=~\"Predict\" OR protoPayload.methodName=~\"StreamGenerateContent\")",
+            "resourceNames": [
+              "projects/agentic-ai-lens-placeholder"
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 58,
+        "height": 16,
+        "width": 24,
+        "widget": {
+          "title": "Input tokens: Vertex serving log events",
+          "logsPanel": {
+            "filter": "protoPayload.serviceName=\"aiplatform.googleapis.com\"\n(protoPayload.methodName=~\"GenerateContent\" OR protoPayload.methodName=~\"Predict\" OR protoPayload.methodName=~\"StreamGenerateContent\")",
+            "resourceNames": [
+              "projects/agentic-ai-lens-placeholder"
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 74,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Output tokens (15 min)",
+          "xyChart": {
+            "chartOptions": {
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "STACKED_BAR",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\" metric.label.type=\"output\"",
+                    "aggregation": {
+                      "alignmentPeriod": "900s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": []
+                    }
+                  }
+                }
+              }
+            ],
+            "yAxis": {
+              "label": "Output tokens",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 74,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Tokens by model (15 min)",
+          "xyChart": {
+            "chartOptions": {
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"aiplatform.googleapis.com/publisher/online_serving/token_count\" resource.type=\"aiplatform.googleapis.com/PublisherModel\"",
+                    "aggregation": {
+                      "alignmentPeriod": "900s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "resource.label.model_user_id"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "yAxis": {
+              "label": "Tokens",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 92,
+        "height": 16,
+        "width": 24,
+        "widget": {
+          "title": "Output tokens: Vertex serving log events",
+          "logsPanel": {
+            "filter": "protoPayload.serviceName=\"aiplatform.googleapis.com\"\n(protoPayload.methodName=~\"GenerateContent\" OR protoPayload.methodName=~\"Predict\" OR protoPayload.methodName=~\"StreamGenerateContent\")",
+            "resourceNames": [
+              "projects/agentic-ai-lens-placeholder"
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 92,
+        "height": 16,
+        "width": 24,
+        "widget": {
+          "title": "Tokens by model: Vertex serving log events",
+          "logsPanel": {
+            "filter": "protoPayload.serviceName=\"aiplatform.googleapis.com\"\n(protoPayload.methodName=~\"GenerateContent\" OR protoPayload.methodName=~\"Predict\" OR protoPayload.methodName=~\"StreamGenerateContent\")",
+            "resourceNames": [
+              "projects/agentic-ai-lens-placeholder"
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 108,
+        "height": 4,
+        "width": 48,
+        "widget": {
+          "title": "Agents — per-agent usage",
+          "text": {
+            "content": "**Per-agent LLM usage** from structured `llm_usage` logs on Reasoning Engines. Use **@agent_id** (A5) to filter Agents widgets.\n\nCharts populate after **Reasoning Engine redeploy** (see `docs/agent-instrumentation-spec.md`). Log-based metrics do not backfill.\n\nMetrics: `logging.googleapis.com/user/lens_llm_*` · 15-minute buckets",
+            "format": "MARKDOWN"
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 112,
+        "height": 18,
+        "width": 48,
+        "widget": {
+          "title": "Top agents — 24h tokens & calls (A2)",
+          "timeSeriesTable": {
+            "columnSettings": [
+              {
+                "column": "agent_id",
+                "displayName": "Agent",
+                "visible": true
+              },
+              {
+                "column": "value",
+                "displayName": "Total tokens (24h)",
+                "visible": true
+              },
+              {
+                "column": "value-1",
+                "displayName": "LLM calls (24h)",
+                "visible": true
+              }
+            ],
+            "dataSets": [
+              {
+                "minAlignmentPeriod": "86400s",
+                "tableTemplate": "",
+                "timeSeriesQuery": {
+                  "outputFullDuration": true,
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/lens_llm_total_tokens\" resource.type=\"aiplatform.googleapis.com/ReasoningEngine\" metric.label.agent_id=monitoring.regex.full_match(${agent_id})",
+                    "aggregation": {
+                      "alignmentPeriod": "86400s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "metric.label.agent_id"
+                      ]
+                    },
+                    "pickTimeSeriesFilter": {
+                      "direction": "TOP",
+                      "numTimeSeries": 25,
+                      "rankingMethod": "METHOD_MEAN"
+                    }
+                  }
+                }
+              },
+              {
+                "minAlignmentPeriod": "86400s",
+                "tableTemplate": "",
+                "timeSeriesQuery": {
+                  "outputFullDuration": true,
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/lens_llm_call_count\" resource.type=\"aiplatform.googleapis.com/ReasoningEngine\" metric.label.agent_id=monitoring.regex.full_match(${agent_id})",
+                    "aggregation": {
+                      "alignmentPeriod": "86400s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "metric.label.agent_id"
+                      ]
+                    },
+                    "pickTimeSeriesFilter": {
+                      "direction": "TOP",
+                      "numTimeSeries": 25,
+                      "rankingMethod": "METHOD_MEAN"
+                    }
+                  }
+                }
+              }
+            ],
+            "metricVisualization": "NUMBER"
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 130,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Tokens per agent (15 min)",
+          "xyChart": {
+            "chartOptions": {
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/lens_llm_total_tokens\" resource.type=\"aiplatform.googleapis.com/ReasoningEngine\" metric.label.agent_id=monitoring.regex.full_match(${agent_id})",
+                    "aggregation": {
+                      "alignmentPeriod": "900s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "metric.label.agent_id"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "yAxis": {
+              "label": "Tokens",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 130,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "LLM calls per agent (15 min)",
+          "xyChart": {
+            "chartOptions": {
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/lens_llm_call_count\" resource.type=\"aiplatform.googleapis.com/ReasoningEngine\" metric.label.agent_id=monitoring.regex.full_match(${agent_id})",
+                    "aggregation": {
+                      "alignmentPeriod": "900s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "metric.label.agent_id"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "yAxis": {
+              "label": "Calls",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 148,
+        "height": 16,
+        "width": 24,
+        "widget": {
+          "title": "Tokens per agent: llm_usage log events",
+          "logsPanel": {
+            "filter": "resource.type=\"aiplatform.googleapis.com/ReasoningEngine\"\njsonPayload.event=\"llm_usage\"\njsonPayload.agent_id=~\"${agent_id}\"",
+            "resourceNames": [
+              "projects/agentic-ai-lens-placeholder"
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 148,
+        "height": 16,
+        "width": 24,
+        "widget": {
+          "title": "LLM calls per agent: llm_usage log events",
+          "logsPanel": {
+            "filter": "resource.type=\"aiplatform.googleapis.com/ReasoningEngine\"\njsonPayload.event=\"llm_usage\"\njsonPayload.agent_id=~\"${agent_id}\"",
+            "resourceNames": [
+              "projects/agentic-ai-lens-placeholder"
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 164,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Prompt tokens per agent (15 min)",
+          "xyChart": {
+            "chartOptions": {
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/lens_llm_prompt_tokens\" resource.type=\"aiplatform.googleapis.com/ReasoningEngine\" metric.label.agent_id=monitoring.regex.full_match(${agent_id})",
+                    "aggregation": {
+                      "alignmentPeriod": "900s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "metric.label.agent_id"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "yAxis": {
+              "label": "Prompt tokens",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 164,
+        "height": 18,
+        "width": 24,
+        "widget": {
+          "title": "Output tokens per agent (15 min)",
+          "xyChart": {
+            "chartOptions": {
+              "mode": "COLOR"
+            },
+            "dataSets": [
+              {
+                "plotType": "LINE",
+                "targetAxis": "Y1",
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"logging.googleapis.com/user/lens_llm_output_tokens\" resource.type=\"aiplatform.googleapis.com/ReasoningEngine\" metric.label.agent_id=monitoring.regex.full_match(${agent_id})",
+                    "aggregation": {
+                      "alignmentPeriod": "900s",
+                      "perSeriesAligner": "ALIGN_DELTA",
+                      "crossSeriesReducer": "REDUCE_SUM",
+                      "groupByFields": [
+                        "metric.label.agent_id"
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            "yAxis": {
+              "label": "Output tokens",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 182,
+        "height": 16,
+        "width": 24,
+        "widget": {
+          "title": "Prompt tokens per agent: llm_usage log events",
+          "logsPanel": {
+            "filter": "resource.type=\"aiplatform.googleapis.com/ReasoningEngine\"\njsonPayload.event=\"llm_usage\"\njsonPayload.agent_id=~\"${agent_id}\"",
+            "resourceNames": [
+              "projects/agentic-ai-lens-placeholder"
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 182,
+        "height": 16,
+        "width": 24,
+        "widget": {
+          "title": "Output tokens per agent: llm_usage log events",
+          "logsPanel": {
+            "filter": "resource.type=\"aiplatform.googleapis.com/ReasoningEngine\"\njsonPayload.event=\"llm_usage\"\njsonPayload.agent_id=~\"${agent_id}\"",
+            "resourceNames": [
+              "projects/agentic-ai-lens-placeholder"
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

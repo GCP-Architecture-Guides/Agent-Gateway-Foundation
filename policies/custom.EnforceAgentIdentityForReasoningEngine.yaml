@@ -1,0 +1,10 @@
+name: organizations/${var.organization_id}/customConstraints/custom.${var.prefix}EnforceAgentIdentityForReasoningEngine
+resourceTypes:
+- aiplatform.googleapis.com/ReasoningEngine
+methodTypes:
+- CREATE
+- UPDATE
+condition: "resource.spec.identityType == \"AGENT_IDENTITY\""
+actionType: ALLOW
+displayName: "${var.prefix} - Enforce AGENT_IDENTITY for Reasoning Engines"
+description: "Ensures Reasoning Engines are deployed with an explicit Agent Identity instead of User Identity."

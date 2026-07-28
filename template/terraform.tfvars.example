@@ -1,0 +1,60 @@
+# terraform.tfvars — New Project Configuration
+# Copy this file to terraform.tfvars and fill in your values.
+# This is the ONLY file you need to edit to provision a new security stack.
+
+# ── Required: Your GCP project ─────────────────────────────────────────────
+project_id      = "YOUR_PROJECT_ID"
+organization_id = "YOUR_ORG_ID"        # gcloud organizations list
+region          = "us-east1"
+location        = "us-east1"
+prefix          = "YOUR_TEAM_PREFIX"   # e.g. "hr-team", "code-review", "data-platform"
+
+# ── Agent provisioning ──────────────────────────────────────────────────────
+# Set create_agent = false if you are deploying your own agent separately.
+create_agent        = false
+agent_name          = "my-agent-v1"
+agent_description   = "My team's AI agent secured by Agent Gateway."
+agent_department    = "engineering"
+agent_team          = "my-team"
+
+# ── Egress allowlist ────────────────────────────────────────────────────────
+# Add any external API hosts your agent needs to call.
+# The gateway is deny-by-default — hosts NOT listed here have no egress route.
+allowed_egress_hosts = [
+  # GCP core APIs (keep these)
+  "aiplatform.googleapis.com",
+  "telemetry.googleapis.com",
+  "logging.googleapis.com",
+  "cloudtrace.googleapis.com",
+  "storage.googleapis.com",
+  "oauth2.googleapis.com",
+  "iamcredentials.googleapis.com",
+  "secretmanager.googleapis.com",
+
+  # Add your agent's external dependencies:
+  # "api.github.com",
+  # "my-internal-api.example.com",
+]
+
+# ── Observability alerts (optional) ────────────────────────────────────────
+enable_token_alerts             = false   # set true + add notification channels to enable
+enable_model_armor_security_alerts = false
+security_google_chat_space      = ""      # spaces/AAAA... (optional)
+google_chat_space               = ""      # spaces/AAAA... (optional)
+alert_email_address             = ""      # optional
+
+# ── Multi-project agent observability ──────────────────────────────────────
+# Growth path: as new teams deploy their own per-team gateway in a separate
+# GCP project, add their project_id here and run: terraform apply
+#
+# New agents auto-appear in the Org Agentic Observability dashboard.
+# No other changes needed — dashboard groups by resource.project_id.
+#
+# Within each project, agents are auto-discovered from:
+#   - llm_usage logs   → Agent Observability dashboard (${agent_id} dropdown)
+#   - gateway audit logs → Gateway Observability dashboard (@agent_identity dropdown)
+org_monitored_project_ids = [
+  # "hr-team-project-id",
+  # "code-review-team-project-id",
+  # "data-platform-project-id",
+]

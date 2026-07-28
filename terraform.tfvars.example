@@ -1,0 +1,77 @@
+# =============================================================================
+# terraform.tfvars.example
+#
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored and should NEVER be committed.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#   # then edit terraform.tfvars with your project details
+# =============================================================================
+
+# =========================================================================
+# REQUIRED: Core Infrastructure
+# =========================================================================
+# Your GCP project ID (not project number)
+project_id = "YOUR_PROJECT_ID"
+
+# GCP region for all resources (Agent Gateway, Model Armor, VPC, etc.)
+region   = "us-east1"
+location = "us-east1"
+
+# Short prefix used to name all resources (gateways, templates, policies).
+# Use lowercase letters, digits, and hyphens only. Max ~15 chars recommended.
+# Example: "acme-corp", "my-org", "team-alpha"
+prefix = "your-org-prefix"
+
+# Your GCP Organization ID (numeric, e.g. "123456789012").
+# Find it with: gcloud organizations list
+organization_id = "YOUR_ORG_ID"
+
+# =========================================================================
+# AGENT DEPLOYMENT METADATA
+# =========================================================================
+# Display name of the Reasoning Engine agent. Used in guardrail tests and
+# Vertex AI Console. Must be a valid Python identifier (underscores, no hyphens).
+agent_name        = "chat-agent-v1"
+agent_description = "A foundational chat agent demonstrating Agent Gateway security integrations."
+
+# Org telemetry labels — required by the OTEL org policy constraint.
+agent_department = "engineering"
+agent_team       = "sec-ops"
+# agent_role     = "customer-support"   # optional, has a default
+
+# =========================================================================
+# EGRESS GATEWAY CONFIGURATION
+# =========================================================================
+# Hosts the agent is allowed to call via PSC egress routing.
+# Hosts NOT in this list → gateway drops connection (deny-by-default).
+# REQUIRED: aiplatform.googleapis.com and telemetry.googleapis.com
+allowed_egress_hosts = [
+  "cloudasset.googleapis.com",
+  "logging.googleapis.com",
+  "cloudresourcemanager.googleapis.com",
+  "cloudresourcemanager.mtls.googleapis.com",
+  "storage.googleapis.com",
+  "cloudtrace.googleapis.com",
+  "discoveryengine.googleapis.com",
+  "github.com",
+  "api.github.com",
+  "raw.githubusercontent.com",
+  "www.googleapis.com",
+  "docs.cloud.google.com",
+  "www.google.com",
+  "iamcredentials.googleapis.com",
+  "oauth2.googleapis.com",
+  "secretmanager.googleapis.com",
+  "terraform.io",
+  "aiplatform.googleapis.com",
+  "telemetry.googleapis.com"
+]
+
+# =========================================================================
+# OBSERVABILITY ALERTS (OPTIONAL)
+# =========================================================================
+# slack_auth_token    = "xoxb-YOUR-SLACK-BOT-TOKEN"
+# slack_channel_name  = "#agent-alerts"
+# alert_email_address = "alerts@your-domain.com"
+# google_chat_space   = "spaces/YOUR_SPACE_ID"

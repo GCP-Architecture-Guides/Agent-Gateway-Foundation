@@ -1,0 +1,4 @@
+name: projects/${var.project_id}/policies/custom.${var.prefix}EnforceReasoningEngineOtelConfig
+spec:
+  rules:
+  - enforce: true
