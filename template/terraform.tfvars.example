@@ -61,14 +61,11 @@ org_monitored_project_ids = [
 
 # ── IAP (Identity-Aware Proxy) — Ingress Identity Enforcement (optional) ───
 # Set iap_enabled = true to enforce that only iap_allowed_members can invoke
-# Reasoning Engines through the ingress gateway. Adds identity-layer enforcement
-# on top of Model Armor content policies.
+# Reasoning Engines through the ingress gateway.
+# Same pattern as Model Armor / SGP — no OAuth brand or client needed.
+# After enabling: callers must pass IAP identity verification.
 #
-# Requires: iap_support_email must be a Google account/group in this project.
-# After enabling: callers must present a valid IAP token (not just a GCP token).
-#
-# iap_enabled      = true
-# iap_support_email = "my-team@example.com"
+# iap_enabled = true
 # iap_allowed_members = [
 #   "user:alice@example.com",
 #   "serviceAccount:my-agent-sa@my-project.iam.gserviceaccount.com",

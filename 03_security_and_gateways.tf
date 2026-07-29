@@ -313,37 +313,22 @@ resource "google_network_security_authz_policy" "egress_sgp_policy" {
 # IAP (Identity-Aware Proxy) — Ingress Identity Enforcement
 # ==============================================================================
 # Gated by var.iap_enabled (default: false).
-# Set iap_enabled = true in terraform.tfvars and provide iap_support_email
-# to deploy IAP identity enforcement on the ingress gateway.
+# Set iap_enabled = true in terraform.tfvars to enforce that only
+# iap_allowed_members can call Reasoning Engines through the ingress gateway.
 #
-# Security layer added: only identities in iap_allowed_members can invoke
-# Reasoning Engines through the ingress gateway. Complements Model Armor
-# (content safety) with identity-level enforcement.
+# Pattern: identical to Model Armor / SGP extensions — an authz_extension
+# pointing at the IAP service endpoint + an authz_policy targeting the ingress
+# gateway. No IAP brand or OAuth client needed — the gateway validates identity
+# tokens natively via the IAP service.
 #
 # Dependency chain:
-#   google_iap_brand → google_iap_client → iap_extension → ingress_iap_policy
+#   google_project_service.iap
+#     → google_network_services_authz_extension.iap_extension
+#       → google_network_security_authz_policy.ingress_iap_policy
+#   google_project_iam_member.iap_accessor  (parallel — grants access)
 # ==============================================================================
 
-# IAP OAuth Brand (one per project — required for IAP client creation)
-resource "google_iap_brand" "agw_brand" {
-  count = var.iap_enabled ? 1 : 0
-
-  project           = var.project_id
-  support_email     = var.iap_support_email
-  application_title = "${var.prefix} Agent Gateway"
-
-  depends_on = [google_project_service.iap]
-}
-
-# IAP OAuth Client (credentials used by the IAP authz extension)
-resource "google_iap_client" "agw_iap_client" {
-  count = var.iap_enabled ? 1 : 0
-
-  brand        = google_iap_brand.agw_brand[0].name
-  display_name = "${var.prefix}-agw-iap-client"
-}
-
-# IAP Authz Extension — plugs IAP identity check into the Network Services authz chain
+# IAP Authz Extension — calls the IAP service to verify caller identity
 resource "google_network_services_authz_extension" "iap_extension" {
   count    = var.iap_enabled ? 1 : 0
   provider = google-beta
@@ -352,25 +337,16 @@ resource "google_network_services_authz_extension" "iap_extension" {
   location = var.location
   project  = var.project_id
 
-  # IAP regional service endpoint for Agent Gateway authz extension
-  service = "iap.${var.location}.rep.googleapis.com"
-  timeout = "5s"
+  # IAP regional service endpoint — same REP pattern as Model Armor
+  service  = "iap.${var.location}.rep.googleapis.com"
+  timeout  = "5s"
+  metadata = {}
 
-  metadata = {
-    # IAP client_id is required so the extension knows which OAuth client
-    # to validate tokens against
-    client_id = google_iap_client.agw_iap_client[0].client_id
-  }
-
-  depends_on = [
-    google_project_service.iap,
-    google_iap_client.agw_iap_client,
-  ]
+  depends_on = [google_project_service.iap]
 }
 
-# IAP Authz Policy — attaches IAP extension to the INGRESS gateway
-# policyProfile = AUTHZ_EXTENSION: identity check (not content evaluation)
-# This is distinct from CONTENT_AUTHZ used for Model Armor / SGP.
+# IAP Authz Policy — attaches the IAP extension to the INGRESS gateway
+# All calls through the ingress must pass IAP identity verification.
 resource "google_network_security_authz_policy" "ingress_iap_policy" {
   count    = var.iap_enabled ? 1 : 0
   provider = google-beta
@@ -380,7 +356,7 @@ resource "google_network_security_authz_policy" "ingress_iap_policy" {
   project  = var.project_id
 
   action         = "CUSTOM"
-  policy_profile = "AUTHZ_EXTENSION"
+  policy_profile = "PRINCIPAL_AUTHZ"
 
   target {
     resources = [google_network_services_agent_gateway.ingress_gateway.id]
@@ -395,7 +371,7 @@ resource "google_network_security_authz_policy" "ingress_iap_policy" {
   depends_on = [google_network_services_authz_extension.iap_extension]
 }
 
-# Grant iap_allowed_members the IAP accessor role so they can reach the gateway
+# Grant allowed identities the IAP accessor role so they pass the extension check
 resource "google_project_iam_member" "iap_accessor" {
   for_each = var.iap_enabled ? toset(var.iap_allowed_members) : toset([])
 
