@@ -10,20 +10,39 @@ CALLER_CWD="$(pwd)"  # saved before cd — used to resolve relative --agent-path
 
 # ── Argument parsing ─────────────────────────────────────────────
 AGENT_PATH_ARG=""
+AGENT_NAME_ARG=""        # overrides terraform.tfvars agent_name
+AGENT_DESC_ARG=""        # overrides terraform.tfvars agent_description
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --agent-path)
       AGENT_PATH_ARG="$2"; shift 2 ;;
+    --agent-name)
+      AGENT_NAME_ARG="$2"; shift 2 ;;
+    --agent-description)
+      AGENT_DESC_ARG="$2"; shift 2 ;;
     --help|-h)
-      echo "Usage: $0 [--agent-path /path/to/agent]"
+      echo "Usage: $0 [--agent-path PATH] [--agent-name NAME] [--agent-description DESC]"
       echo ""
-      echo "  --agent-path  Directory containing agent.py + requirements.txt."
-      echo "                Accepts absolute or relative paths (resolved from your"
-      echo "                current working directory, not the foundation root)."
-      echo "                Default: \$FOUNDATION/agents/chat-agent/"
+      echo "  --agent-path         Directory containing agent.py + requirements.txt."
+      echo "                       Accepts absolute or relative paths (resolved from your"
+      echo "                       current working directory, not the foundation root)."
+      echo "                       Default: \$FOUNDATION/agents/chat-agent/"
       echo ""
-      echo "  Example (foundation as git submodule in a parent repo):"
+      echo "  --agent-name         Override the agent display name (default: agent_name"
+      echo "                       from terraform.tfvars). Use this to deploy multiple"
+      echo "                       agents to the same project without editing terraform.tfvars."
+      echo "                       Must be a valid Python identifier (underscores, not hyphens)."
+      echo ""
+      echo "  --agent-description  Override the agent description (default: agent_description"
+      echo "                       from terraform.tfvars)."
+      echo ""
+      echo "  Examples:"
+      echo "    # Single agent (uses terraform.tfvars agent_name)"
       echo "    bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/my-agent"
+      echo ""
+      echo "    # Multiple agents — same gateway, different names"
+      echo "    bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/agent-1 --agent-name agent_one --agent-description 'Agent one'"
+      echo "    bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/agent-2 --agent-name agent_two --agent-description 'Agent two'"
       exit 0 ;;
     *) echo "❌ Unknown argument: $1  (run with --help for usage)"; exit 1 ;;
   esac
@@ -43,14 +62,27 @@ PROJECT_ID=$(grep -oP '^project_id\s*=\s*"\K[^"]+' "$TFVARS")
 REGION=$(grep -oP '^location\s*=\s*"\K[^"]+' "$TFVARS" 2>/dev/null \
   || grep -oP '^region\s*=\s*"\K[^"]+' "$TFVARS")
 PREFIX=$(grep -oP '^prefix\s*=\s*"\K[^"]+' "$TFVARS" 2>/dev/null || echo "")
-AGENT_NAME=$(grep -oP '^agent_name\s*=\s*"\K[^"]+' "$TFVARS" 2>/dev/null || echo "my-agent")
+AGENT_NAME=$(grep -oP '^agent_name\s*=\s*"\K[^"]+' "$TFVARS" 2>/dev/null || echo "my_agent")
 AGENT_DESC=$(grep -oP '^agent_description\s*=\s*"\K[^"]+' "$TFVARS" 2>/dev/null \
   || echo "A foundational agent demonstrating Agent Gateway security integrations.")
+
+# CLI flags override terraform.tfvars values — allows multi-agent deploys
+# to the same project without editing terraform.tfvars.
+[[ -n "$AGENT_NAME_ARG" ]] && AGENT_NAME="$AGENT_NAME_ARG"
+[[ -n "$AGENT_DESC_ARG" ]] && AGENT_DESC="$AGENT_DESC_ARG"
+
+# Validate agent_name: must be a Python identifier (underscores, not hyphens)
+if [[ ! "$AGENT_NAME" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+  echo "❌ agent_name '$AGENT_NAME' is not a valid Python identifier."
+  echo "   Use underscores, not hyphens. Example: agent_two (not agent-two)"
+  exit 1
+fi
 
 if [[ -z "$PROJECT_ID" || -z "$REGION" ]]; then
   echo "❌ terraform.tfvars is missing project_id or location/region — cannot deploy."
   exit 1
 fi
+
 
 # Derive gateway resource names from prefix (matches Terraform naming convention)
 INGRESS_GW="projects/${PROJECT_ID}/locations/${REGION}/agentGateways/${PREFIX}-ingress-gateway"

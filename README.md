@@ -356,7 +356,52 @@ cp foundation/terraform.tfvars.example foundation/terraform.tfvars
 # Fill in terraform.tfvars — done
 ```
 
----
+### Deploying multiple agents to the same gateway
+
+The gateway infrastructure is deployed once and shared. Each additional agent
+just needs its own deploy — no `terraform apply` needed (unless it calls new
+external hosts not yet in `allowed_egress_hosts`).
+
+```
+my-team-repo/
+  ├── src/
+  │   ├── agent-1/   ← deployed as RE "agent_one"
+  │   ├── agent-2/   ← deploy as RE "agent_two"
+  │   └── agent-3/   ← deploy as RE "agent_three"
+  └── foundation/    ← one gateway, shared by all agents
+```
+
+Use `--agent-name` to deploy each agent with its own identity without
+editing `terraform.tfvars`:
+
+```bash
+# Agent 1 — name comes from terraform.tfvars (already deployed)
+bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/agent-1
+
+# Agent 2 — override name inline, no terraform.tfvars edit
+bash foundation/scripts/deploy_chat_agent.sh \
+  --agent-path ./src/agent-2 \
+  --agent-name agent_two \
+  --agent-description "What agent two does"
+
+# Agent 3
+bash foundation/scripts/deploy_chat_agent.sh \
+  --agent-path ./src/agent-3 \
+  --agent-name agent_three \
+  --agent-description "What agent three does"
+```
+
+Register a separate SGP policy per agent (different topic constraints):
+
+```bash
+# Update agent_name + sgp_nlc_constraint in terraform.tfvars for each agent,
+# then register its policy:
+bash foundation/scripts/create_sgp_policy.sh
+```
+
+> [!NOTE]
+> `agent_name` must be a valid Python identifier — underscores only, no hyphens.
+> The deploy script validates this and fails fast if the name is invalid.
 
 ## Antigravity Skills Setup (AI Coding Assistant)
 
