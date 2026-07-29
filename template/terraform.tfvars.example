@@ -60,10 +60,11 @@ org_monitored_project_ids = [
 ]
 
 # ── IAP (Identity-Aware Proxy) — Ingress Identity Enforcement (optional) ───
-# Set iap_enabled = true to enforce that only iap_allowed_members can invoke
-# Reasoning Engines through the ingress gateway.
-# Same pattern as Model Armor / SGP — no OAuth brand or client needed.
-# After enabling: callers must pass IAP identity verification.
+# Set iap_enabled = true to add identity-layer enforcement on the ingress gateway.
+# IAP acts as the centralized identity door for ALL agents behind this gateway.
+# Pattern: REQUEST_AUTHZ authz_extension → iap.googleapis.com (global endpoint).
+# Distinct from Vertex AI IAM (per-RE) — IAP applies at the gateway level.
+# Callers must have roles/iap.httpsResourceAccessor to pass the IAP check.
 #
 # iap_enabled = true
 # iap_allowed_members = [

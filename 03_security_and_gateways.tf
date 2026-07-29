@@ -340,6 +340,7 @@ resource "google_network_security_authz_policy" "egress_sgp_policy" {
 
 # IAP Authz Extension — delegates access decisions to IAP
 # Note: iapPolicyVersion = "V1" is REQUIRED in metadata per the official spec.
+# Fail-closed behavior (deny if IAP unreachable) is the API default for authz extensions.
 resource "google_network_services_authz_extension" "iap_extension" {
   count    = var.iap_enabled ? 1 : 0
   provider = google-beta
@@ -349,9 +350,8 @@ resource "google_network_services_authz_extension" "iap_extension" {
   project  = var.project_id
 
   # Global IAP service endpoint (not a regional REP endpoint like Model Armor)
-  service   = "iap.googleapis.com"
-  timeout   = "1s"
-  fail_open = false # Fail-closed: deny access if IAP is unreachable
+  service  = "iap.googleapis.com"
+  timeout  = "1s"
 
   metadata = {
     iapPolicyVersion = "V1" # Required — extension will reject requests without this

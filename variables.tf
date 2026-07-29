@@ -408,9 +408,12 @@ variable "sgp_nlc_constraint" {
 
 # ==============================================================================
 # IAP (Identity-Aware Proxy) — Ingress Identity Enforcement
-# Configures IAP as an authz extension on the ingress gateway so that only
-# authenticated, explicitly-allowed identities can invoke Reasoning Engines.
-# Pattern: same as Model Armor / SGP — no IAP brand or OAuth client needed.
+# Configures IAP as a REQUEST_AUTHZ extension on the ingress gateway.
+# IAP verifies the caller's Google identity before Model Armor content checks.
+# This is the centralized identity door for ALL agents behind this gateway.
+# Distinct from Vertex AI IAM (per-RE) — IAP applies at the gateway level.
+# Pattern: authz_extension (service=iap.googleapis.com) + REQUEST_AUTHZ policy
+# Note: callers must have roles/iap.httpsResourceAccessor in iap_allowed_members.
 # ==============================================================================
 
 variable "iap_allowed_members" {
