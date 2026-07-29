@@ -63,6 +63,23 @@ echo "   Project : $PROJECT_ID  |  Region : $REGION  |  Agent : $AGENT_NAME"
 echo ""
 
 # =============================================================================
+# Phase 0: Bootstrap — enable prerequisite APIs before Terraform can run
+# =============================================================================
+# cloudresourcemanager and agentregistry must exist before terraform init.
+# Terraform itself calls the CRM API just to read project metadata — if CRM
+# is disabled, every terraform command fails with 403, including the one that
+# would enable CRM. This is a one-time bootstrap; subsequent runs are instant.
+echo "▶ [0/4] Bootstrapping prerequisite APIs (one-time on fresh projects)..."
+echo "  Enabling: cloudresourcemanager.googleapis.com agentregistry.googleapis.com"
+gcloud services enable \
+  cloudresourcemanager.googleapis.com \
+  agentregistry.googleapis.com \
+  --project="$PROJECT_ID" \
+  --quiet
+echo "✅ Prerequisite APIs ready."
+echo ""
+
+# =============================================================================
 # Phase 1: Infrastructure & Security (Terraform)
 # =============================================================================
 echo "▶ [1/4] Applying Infrastructure and Security (Terraform)..."

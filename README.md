@@ -64,6 +64,19 @@ no scripts. Relative paths work. Antigravity sees everything in one workspace.
 > `terraform apply -target=google_org_policy_custom_constraint.*` once with
 > elevated credentials.
 
+**Bootstrap (one-time on fresh projects):**
+
+`deploy_all.sh` handles this automatically. If you run `terraform apply` directly
+(Path B/C), enable these two APIs first — Terraform cannot call any GCP endpoint
+without Cloud Resource Manager, and cannot enable it itself from cold:
+
+```bash
+gcloud services enable \
+  cloudresourcemanager.googleapis.com \
+  agentregistry.googleapis.com \
+  --project=YOUR_PROJECT_ID
+```
+
 **Authenticate:**
 ```bash
 gcloud auth application-default login

@@ -1,6 +1,25 @@
 # ------------------------------------------------------------------------------
 # 1. API ENABLEMENT
+#
+# NOTE: cloudresourcemanager and agentregistry are enabled via gcloud in
+# deploy_all.sh Phase 0 BEFORE terraform runs. Terraform needs the CRM API
+# just to call any GCP endpoint — it cannot enable itself from cold. These
+# resources below bring them into Terraform state after the bootstrap.
+# For manual runs (Path B/C): run the bootstrap command first:
+#   gcloud services enable cloudresourcemanager.googleapis.com \
+#     agentregistry.googleapis.com --project=YOUR_PROJECT_ID
 # ------------------------------------------------------------------------------
+
+resource "google_project_service" "cloudresourcemanager" {
+  service            = "cloudresourcemanager.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "agentregistry" {
+  service            = "agentregistry.googleapis.com"
+  disable_on_destroy = false
+}
+
 resource "google_project_service" "compute" {
   service            = "compute.googleapis.com"
   disable_on_destroy = false
@@ -34,11 +53,6 @@ resource "google_project_service" "dlp" {
 
 resource "google_project_service" "dns" {
   service            = "dns.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "agentregistry" {
-  service            = "agentregistry.googleapis.com"
   disable_on_destroy = false
 }
 
