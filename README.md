@@ -229,16 +229,6 @@ bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/my-agent
 > Add `src/my-agent/.env` to your `.gitignore` — it contains live project
 > credentials and is regenerated on every deploy.
 
-**If your agent runs on Cloud Run instead of Vertex AI RE:**
-
-```bash
-INGRESS=$(terraform -chdir=foundation output -raw ingress_gateway 2>/dev/null)
-EGRESS=$(terraform -chdir=foundation output -raw egress_gateway 2>/dev/null)
-
-gcloud run services update YOUR_SERVICE \
-  --region=us-east1 \
-  --set-env-vars="AGENT_GATEWAY_INGRESS=$INGRESS,AGENT_GATEWAY_EGRESS=$EGRESS"
-```
 
 ### 6. Update the foundation
 
@@ -320,15 +310,6 @@ terraform -chdir=foundation apply -auto-approve
 bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/my-agent
 ```
 
-**If your agent runs on Cloud Run:**
-
-```bash
-INGRESS=$(terraform -chdir=foundation output -raw ingress_gateway 2>/dev/null)
-EGRESS=$(terraform -chdir=foundation output -raw egress_gateway 2>/dev/null)
-gcloud run services update YOUR_SERVICE \
-  --region="$(terraform -chdir=foundation output -raw location)" \
-  --set-env-vars="AGENT_GATEWAY_INGRESS=$INGRESS,AGENT_GATEWAY_EGRESS=$EGRESS"
-```
 
 ### 5. Wire Antigravity skills (once per developer)
 

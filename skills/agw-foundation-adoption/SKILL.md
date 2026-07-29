@@ -5,7 +5,7 @@ description: >
   Covers all three adoption paths: Path A (standalone new project), Path B
   (git submodule sidecar in existing repo), and Path C (local project to GCP,
   no GitHub repo required). Documents terraform.tfvars anchor comments,
-  --agent-path flag, Antigravity skills symlink, Cloud Run injection,
+  --agent-path flag, Antigravity skills symlink, multi-agent deploy,
   multi-agent deploy, and foundation update patterns. Read this before
   touching any config or deploy commands.
 ---
@@ -199,27 +199,6 @@ The script will:
 > Add `src/my-agent/.env` to your repo's `.gitignore` — it contains live
 > project credentials and is regenerated on every deploy.
 
-### Option B: Cloud Run (existing service)
-
-If your agent is already running on Cloud Run, you don't redeploy it — you
-just inject the gateway env vars from Terraform outputs:
-
-```bash
-# Read outputs
-INGRESS=$(terraform -chdir=foundation output -raw ingress_gateway 2>/dev/null)
-EGRESS=$(terraform -chdir=foundation output -raw egress_gateway 2>/dev/null)
-PROJECT=$(terraform -chdir=foundation output -raw project_id 2>/dev/null)
-REGION=$(terraform -chdir=foundation output -raw location 2>/dev/null)
-
-# Inject into your Cloud Run service
-gcloud run services update YOUR_SERVICE_NAME \
-  --region="$REGION" \
-  --set-env-vars="AGENT_GATEWAY_INGRESS=$INGRESS,AGENT_GATEWAY_EGRESS=$EGRESS,GCP_PROJECT_ID=$PROJECT"
-```
-
-Then update your agent code to use `GatewayAgent` — read the
-`gateway-agent-sdk` skill for the exact wiring.
-
 ---
 
 ## Config Flow Reference
@@ -313,14 +292,6 @@ terraform -chdir=foundation apply -auto-approve
 bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/my-agent
 ```
 
-**Cloud Run path:**
-```bash
-INGRESS=$(terraform -chdir=foundation output -raw ingress_gateway 2>/dev/null)
-EGRESS=$(terraform -chdir=foundation output -raw egress_gateway 2>/dev/null)
-gcloud run services update YOUR_SERVICE \
-  --region="$(terraform -chdir=foundation output -raw location)" \
-  --set-env-vars="AGENT_GATEWAY_INGRESS=$INGRESS,AGENT_GATEWAY_EGRESS=$EGRESS"
-```
 
 ### C-5 — Wire Antigravity skills (once per developer)
 
