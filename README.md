@@ -36,9 +36,9 @@ Add this as a **git submodule** inside your existing repo.
 Your agent code stays where it is. Use `--agent-path` to point the deploy script at it.
 
 ### Path C — Gitignored Subfolder (existing repo, no submodule complexity) ← simplest
-Clone the foundation into a `foundation/` subfolder of your team repo and
-gitignore it. No submodule. Antigravity sees agent code and foundation in one
-workspace. Relative paths work. New developers onboard with one command via `setup.sh`.
+One-time `git clone` of the foundation into a `foundation/` subfolder of your
+team repo. Gitignore it. From then on everything is local — no more git,
+no scripts. Relative paths work. Antigravity sees everything in one workspace.
 
 ---
 
@@ -254,112 +254,48 @@ terraform -chdir=foundation apply -auto-approve
 
 ## Path C — Gitignored Subfolder (No Submodule Complexity)
 
-Your team repo tracks your agent code. The foundation lives inside the same
-repo as a plain git clone, gitignored — it never gets pushed. This gives
-you a **single Antigravity workspace** with full visibility into both your
-agent code and the foundation, with no submodule complexity.
+**One git clone. Then everything is local.** No submodule, no scripts, no
+ongoing git relationship with the foundation.
 
 ```
 my-team-repo/                ← your repo (pushed to GitHub normally)
   ├── src/
-  │   └── my-agent/          ← agent code (tracked, pushed)
-  ├── setup.sh               ← bootstraps foundation for every new developer
+  │   └── my-agent/          ← your agent code (tracked, pushed)
   ├── .gitignore             ← includes "foundation/"
-  └── foundation/            ← plain git clone (gitignored, never pushed)
-        └── terraform.tfvars ← also gitignored by foundation's own .gitignore
+  └── foundation/            ← one-time clone (gitignored, stays local)
+        └── terraform.tfvars ← gitignored, you fill this in once
 ```
 
-**Why this beats Path B (git submodule):**
-- No `git submodule update --init` needed after clone — just `bash setup.sh`
-- No detached HEAD, no `.gitmodules` file, no submodule confusion
-- Version controlled via `FOUNDATION_VERSION` in `setup.sh` (in your repo)
-
-**Why this beats the old separate-location approach:**
-- Antigravity workspace = team repo root → sees both agent and foundation
-- `--agent-path` is relative, not absolute — no machine-specific paths
-- Everything in one directory tree
-
-### 1. Add to your team repo's .gitignore
-
-```gitignore
-# Agent-Gateway-Foundation — local only, never pushed to this repo
-foundation/
-src/my-agent/.env
-```
-
-### 2. Create setup.sh in your team repo root
-
-This file lives in YOUR team repo (not in the foundation). Commit it.
+### 1. One-time setup
 
 ```bash
-#!/usr/bin/env bash
-# setup.sh — run once after cloning the team repo
-# Clones Agent-Gateway-Foundation into foundation/ and wires Antigravity skills.
-set -euo pipefail
+# From your team repo root:
 
-FOUNDATION_VERSION="v1.0.0"   # ← bump this line when upgrading the foundation
-FOUNDATION_URL="https://github.com/GCP-Architecture-Guides/Agent-Gateway-Foundation.git"
+# Step 1 — gitignore the foundation folder
+echo "foundation/" >> .gitignore
+echo "src/my-agent/.env" >> .gitignore
+git add .gitignore && git commit -m "chore: gitignore AGW foundation"
 
-if [[ -d "foundation/.git" ]]; then
-  echo "✅ Foundation already cloned at $(cd foundation && git describe --tags)"
-  echo "   To upgrade: edit FOUNDATION_VERSION in setup.sh, then re-run."
-  exit 0
-fi
+# Step 2 — clone the foundation once (not a submodule, just files)
+git clone https://github.com/GCP-Architecture-Guides/Agent-Gateway-Foundation.git foundation
 
-echo "Cloning Agent-Gateway-Foundation at $FOUNDATION_VERSION..."
-git clone "$FOUNDATION_URL" foundation
-cd foundation && git checkout "$FOUNDATION_VERSION" && cd ..
-
-if [[ ! -f "foundation/terraform.tfvars" ]]; then
-  cp foundation/terraform.tfvars.example foundation/terraform.tfvars
-  echo "📝 Created foundation/terraform.tfvars — fill in your GCP project details."
-fi
-
-# Wire Antigravity skills (idempotent)
-mkdir -p ~/.gemini/config/skills
-for d in foundation/skills/*/; do
-  ln -sf "$(pwd)/$d" ~/.gemini/config/skills/"$(basename $d)"
-done
-echo "🔗 $(ls foundation/skills/ | wc -l) Antigravity skills linked."
-echo ""
-echo "✅ Setup complete. Next steps:"
-echo "   1. Fill in foundation/terraform.tfvars"
-echo "   2. terraform -chdir=foundation init"
-echo "   3. terraform -chdir=foundation apply -auto-approve"
-echo "   4. bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/my-agent"
+# Step 3 — create your config
+cp foundation/terraform.tfvars.example foundation/terraform.tfvars
+# Fill in foundation/terraform.tfvars — that's the only file you ever edit
 ```
 
-Commit this to your team repo:
-```bash
-git add setup.sh .gitignore
-git commit -m "feat: add Agent-Gateway-Foundation setup script"
-git push
-```
+> [!NOTE]
+> After the clone, `foundation/` is just a folder of files on your machine.
+> It is **not tracked** by your team repo. No `git push`, no `git pull`,
+> no submodule commands. It stays local.
 
-### 3. New developer onboarding — one command
+### 2. Configure terraform.tfvars
 
-When anyone clones the team repo for the first time:
-```bash
-git clone https://github.com/my-team/my-agent-repo.git
-cd my-agent-repo
-bash setup.sh
-# Fill in foundation/terraform.tfvars — done
-```
-
-`setup.sh` handles: clone, version pin, tfvars template copy, skills symlink.
-
-### 4. Configure terraform.tfvars
-
-```bash
-# Already created by setup.sh — just fill it in
-```
-
-Anchor comments use **relative paths** — they work for every developer
-because the layout is identical after `bash setup.sh`:
+Anchor comments use relative paths — works for every developer:
 
 ```hcl
 # FOUNDATION_ROOT: foundation/
-# AGENT_PATH: src/my-agent       ← relative to repo root, works for everyone
+# AGENT_PATH: src/my-agent
 # DEPLOY_TARGET: reasoning_engine
 
 project_id      = "your-gcp-project-id"
@@ -371,17 +307,16 @@ agent_description = "What my agent does."
 # ... rest of fields same as Path A
 ```
 
-### 5. Deploy infrastructure
+### 3. Deploy infrastructure
 
 ```bash
 terraform -chdir=foundation init
 terraform -chdir=foundation apply -auto-approve
 ```
 
-### 6. Deploy your agent
+### 4. Deploy your agent
 
 ```bash
-# Relative path works because foundation/ and src/ share the same repo root
 bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/my-agent
 ```
 
@@ -395,20 +330,38 @@ gcloud run services update YOUR_SERVICE \
   --set-env-vars="AGENT_GATEWAY_INGRESS=$INGRESS,AGENT_GATEWAY_EGRESS=$EGRESS"
 ```
 
-### 7. Update the foundation
-
-Bump the version in `setup.sh` in your team repo — this is the version pin:
+### 5. Wire Antigravity skills (once per developer)
 
 ```bash
-# In your team repo — edit setup.sh
-# Change: FOUNDATION_VERSION="v1.0.0"
-# To:     FOUNDATION_VERSION="v1.1.0"
-git commit -am "chore: bump Agent-Gateway-Foundation to v1.1.0"
-git push
+mkdir -p ~/.gemini/config/skills
+for d in foundation/skills/*/; do
+  ln -sf "$(pwd)/$d" ~/.gemini/config/skills/"$(basename $d)"
+done
+```
 
-# Each developer then runs:
-cd foundation && git fetch && git checkout v1.1.0 && cd ..
+### 6. When you need a newer foundation version
+
+Delete and re-clone. That's it:
+
+```bash
+rm -rf foundation
+git clone https://github.com/GCP-Architecture-Guides/Agent-Gateway-Foundation.git foundation
+cp foundation/terraform.tfvars.example foundation/terraform.tfvars
+# Re-fill in your values (or keep a backup of your old terraform.tfvars)
+terraform -chdir=foundation init
 terraform -chdir=foundation apply -auto-approve
+```
+
+### Onboarding a new developer
+
+They clone the team repo, then do the same one-time clone:
+
+```bash
+git clone https://github.com/my-team/my-agent-repo.git
+cd my-agent-repo
+git clone https://github.com/GCP-Architecture-Guides/Agent-Gateway-Foundation.git foundation
+cp foundation/terraform.tfvars.example foundation/terraform.tfvars
+# Fill in terraform.tfvars — done
 ```
 
 ---
