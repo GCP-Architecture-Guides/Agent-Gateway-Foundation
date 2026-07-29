@@ -27,7 +27,35 @@ description: >
 
 ---
 
-## Path B — Sidecar (Existing GitHub Repo)
+## Pre-Deploy Checklist
+
+Run through this BEFORE `terraform apply` or `deploy_chat_agent.sh`. Fix anything
+that fails before proceeding — these are the most common sources of wasted time.
+
+- [ ] **APIs bootstrapped** — required on any fresh project BEFORE `terraform init`:
+  ```bash
+  gcloud services enable cloudresourcemanager.googleapis.com agentregistry.googleapis.com \
+    --project=YOUR_PROJECT_ID
+  ```
+- [ ] **`agent_name` is a Python identifier** — underscores only, no hyphens.
+  `my_agent` ✅ · `my-agent` ❌ (deploy script validates and fails fast)
+- [ ] **`requirements.txt` has pinned versions** — `google-adk==X.Y.Z` and
+  `google-cloud-aiplatform==X.Y.Z` must use `==`. Unpinned versions install latest
+  in the RE container and cause startup failures. See `KNOWN_ISSUES.md #008`.
+- [ ] **`agent.py` uses `GatewayAgent`** — NOT bare `Agent` from `google.adk.agents`.
+  Read the `gateway-agent-sdk` skill if migration is needed.
+- [ ] **`roles/orgpolicy.policyAdmin` at ORG level** — NOT project level. This is the
+  #1 first-deploy failure. Ask your GCP org admin to grant it at the org level.
+- [ ] **`terraform.tfvars` has anchor comments** at the top:
+  ```hcl
+  # FOUNDATION_ROOT: foundation/
+  # AGENT_PATH: src/my-agent
+  # DEPLOY_TARGET: reasoning_engine
+  ```
+
+---
+
+ (Existing GitHub Repo)
 
 The recommended team pattern. The foundation handles infrastructure;
 your agent code stays where it is in your existing repo.
@@ -220,19 +248,29 @@ The script will:
 
 ---
 
-## Adding a Second Agent
+## Adding a Second Agent (or More)
+
+The gateway is deployed once and shared. Each additional agent needs only its own
+deploy — no `terraform apply` unless it calls new external hosts.
 
 ```bash
-# Update tfvars with the second agent's name
-# (agent_name in tfvars controls display name + SGP registration)
-# Then deploy pointing at the second agent's directory
-bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/my-second-agent
+# Use --agent-name to set a different name without changing terraform.tfvars
+bash foundation/scripts/deploy_chat_agent.sh \
+  --agent-path ./src/my-second-agent \
+  --agent-name agent_two \
+  --agent-description "What agent two does"
 
 # Register a new SGP policy for it
+# (Read the agw-add-sgp-policy skill for the full workflow)
 bash foundation/scripts/create_sgp_policy.sh
 ```
 
+> [!NOTE]
+> `--agent-name` must be a Python identifier — underscores only.
+> The deploy script validates this and fails fast if hyphens are used.
+
 ---
+
 
 ## Path C — Gitignored Subfolder (No Submodule Complexity)
 
@@ -334,14 +372,47 @@ cp foundation/terraform.tfvars.example foundation/terraform.tfvars
 
 ---
 
+## Adding a New Egress Endpoint
+
+When an agent needs to call an external host that is NOT already in the gateway:
+
+```bash
+# 1. Add the hostname to terraform.tfvars (hostname only — no https://, no path)
+allowed_egress_hosts = [
+  "api.existing-host.com",   # already there
+  "api.new-host.com",        # ADD THIS
+]
+
+# 2. Apply — PSC route is added automatically
+terraform -chdir=foundation apply -auto-approve
+
+# No agent redeploy. No gateway restart needed.
+# The gateway is deny-by-default: hosts not listed have no PSC route
+# and outbound connections are silently dropped.
+```
+
+> [!NOTE]
+> Only the hostname goes in `allowed_egress_hosts` — not the full URL.
+> For HTTPS APIs: `api.example.com` (no `https://`, no path, no port).
+
+---
+
 ## Common First-Deploy Failures
 
-| Error | Cause | Fix |
+| Error / Symptom | Root Cause | Fix |
 |---|---|---|
-| `403 on org policies` | Missing `roles/orgpolicy.policyAdmin` | Get org admin to grant it, or run org policy targets with elevated creds |
-| `400 FAILED_PRECONDITION` on RE create | Org policy not propagated (needs 180s) | Wait, re-run `bash foundation/scripts/deploy_chat_agent.sh --agent-path ...` |
-| `agent.py not found` | Wrong `--agent-path` | Check path is relative to where you ran the command, not the foundation |
-| `ModuleNotFoundError: gateway_agent` | `lib/` not on Python path | Add `sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../foundation/lib"))` |
-| RE state UNKNOWN for 5+ min | Platform state lag (normal) | Wait 5 min, run tests — agent is running |
+| `403: Cloud Resource Manager API disabled` | CRM must be enabled BEFORE `terraform init` (chicken-and-egg) | `gcloud services enable cloudresourcemanager.googleapis.com agentregistry.googleapis.com --project=PROJECT_ID` |
+| `403 on org policy resources` | Missing `roles/orgpolicy.policyAdmin` at ORG level (not project) | Ask GCP org admin to grant at org level, or run with `--target=google_org_policy_custom_constraint.*` |
+| `400 FAILED_PRECONDITION` on RE create | Org policy propagation lag (terraform waits 180s — sometimes needs extra 60s) | Wait 3 min, re-run `deploy_chat_agent.sh` |
+| `agent.py not found` | Wrong `--agent-path` — path is relative to your CWD, not foundation root | Use `./src/my-agent` from repo root, not from inside `foundation/` |
+| `ModuleNotFoundError: gateway_agent` | GatewayAgent SDK not bundled | Confirm `foundation/lib/gateway_agent/` exists; deploy script auto-bundles it |
+| RE state `UNKNOWN` for 5+ min | Platform state propagation lag — normal on first deploy | Wait 5 min, run `test-agent/run_guardrail_tests.py` — agent is likely running |
+| `agent_name` rejected / Python identifier error | Hyphen in agent name | Rename: `agent_two` ✅ not `agent-two` ❌ — deploy script validates this |
+| `BaseModel.__init__() takes 1 positional argument` | Pydantic v2 change in `GlobalGemini` | Use `GlobalGemini(model=model)` keyword arg — see `KNOWN_ISSUES.md #003` |
+| Model Armor 403 on ALL agent responses | PI/Jailbreak filter on `response_template_id` | Remove `response_template_id` — only `request_template_id` — see `KNOWN_ISSUES.md #001` |
+| OTEL SSL crash / RE silent after 1-2 queries | mTLS + aiohttp session singleton (3-layer bug) | Deploy script auto-fixes via 5 OTEL env vars in `.env` — see `KNOWN_ISSUES.md #007` |
+| SGP policy creation fails with `RuntimeIdentity` error | RE not yet ACTIVE / using wrong agent registry entry | Wait 2-3 min after deploy; use only `agentregistry-UUID` entries with `runtimeIdentity` |
+| `contextSpec.memoryBankConfig` on RE create | Platform auto-injects field on CREATE | Deploy script patches this via REST after deploy — expected behaviour |
+| Unpinned `requirements.txt` fails at startup | Latest SDK changes internal transport, breaks `.pth` patch | Pin `google-adk==X.Y.Z` and `google-cloud-aiplatform==X.Y.Z` — see `KNOWN_ISSUES.md #008` |
 
-See `foundation/KNOWN_ISSUES.md` for the full runbook.
+See `foundation/KNOWN_ISSUES.md` for full root-cause analysis and rollback procedures.

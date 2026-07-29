@@ -406,3 +406,45 @@ variable "sgp_nlc_constraint" {
   default     = ""
 }
 
+# ==============================================================================
+# IAP (Identity-Aware Proxy) — Ingress Identity Enforcement
+# Configures IAP as an authz extension on the ingress gateway so that only
+# authenticated, explicitly-allowed identities can invoke Reasoning Engines.
+# ==============================================================================
+
+variable "iap_support_email" {
+  description = <<-EOT
+    Email address shown on the OAuth consent screen for the IAP brand.
+    Required when iap_enabled = true. Must be a Google account or Google Group
+    that is a member of the GCP project. Typically the team's shared inbox.
+    Example: "my-team@example.com"
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "iap_allowed_members" {
+  description = <<-EOT
+    List of identities granted roles/iap.httpsResourceAccessor on the Agent Gateway.
+    Only these identities can invoke Reasoning Engines through the ingress gateway.
+    Use standard IAM member format:
+      - "user:alice@example.com"
+      - "serviceAccount:my-sa@project.iam.gserviceaccount.com"
+      - "group:my-team@example.com"
+    Leave empty ([]) to skip the IAM binding (add manually via Console instead).
+  EOT
+  type        = list(string)
+  default     = []
+}
+
+variable "iap_enabled" {
+  description = <<-EOT
+    Set to true to deploy the IAP authz extension on the ingress gateway.
+    Requires iap_support_email to be set.
+    When false (default), the IAP brand/client/extension/policy resources are not created.
+    The ingress gateway still enforces Model Armor content policies.
+    IAP adds identity-layer enforcement on top.
+  EOT
+  type        = bool
+  default     = false
+}
