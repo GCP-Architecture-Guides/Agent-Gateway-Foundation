@@ -1,12 +1,13 @@
 ---
 name: agw-foundation-adoption
 description: >
-  Use this skill when onboarding a new team to the Agent-Gateway-Foundation,
-  or when wiring an existing agent repo to the gateway. Covers the full
-  sidecar pattern: git submodule, terraform.tfvars, agent code wiring via
-  --agent-path, Antigravity skills symlink, and deploy. Also covers the
-  Cloud Run injection path, adding a second agent, and pulling foundation
-  updates. Read this before touching any config.
+  Use this skill when onboarding a new team to the Agent-Gateway-Foundation.
+  Covers all three adoption paths: Path A (standalone new project), Path B
+  (git submodule sidecar in existing repo), and Path C (local project to GCP,
+  no GitHub repo required). Documents terraform.tfvars anchor comments,
+  --agent-path flag, Antigravity skills symlink, Cloud Run injection,
+  multi-agent deploy, and foundation update patterns. Read this before
+  touching any config or deploy commands.
 ---
 
 # Agent-Gateway-Foundation — Adoption Guide
@@ -16,13 +17,20 @@ description: >
 > Everything else — gateway paths, project ID, OTEL env vars — flows down
 > from it automatically. Never hardcode these values in agent code.
 
+## Which Path Applies?
+
+| Path | When to use |
+|---|---|
+| **A — Standalone** | New GCP project, no existing agent code — clone and go |
+| **B — Sidecar** | Existing GitHub repo with existing agent — git submodule |
+| **C — Local to GCP** | Local project, no GitHub repo — plain clone + absolute `--agent-path` |
+
 ---
 
-## The Sidecar Pattern — Foundation Alongside an Existing Repo
+## Path B — Sidecar (Existing GitHub Repo)
 
-The recommended way to use this foundation is as a **git submodule** inside
-your existing agent repo. The foundation handles infrastructure; your agent
-code stays where it is.
+The recommended team pattern. The foundation handles infrastructure;
+your agent code stays where it is in your existing repo.
 
 ```
 my-team-repo/                   ← your existing repo
@@ -50,8 +58,8 @@ git submodule add https://github.com/OWNER/Agent-Gateway-Foundation.git foundati
 git commit -m "feat: add Agent-Gateway-Foundation as submodule"
 
 # Pin to a stable release (recommended for production)
-cd foundation && git checkout v1.0.2 && cd ..
-git add foundation && git commit -m "chore: pin foundation to v1.0.2"
+cd foundation && git checkout v1.0.0 && cd ..
+git add foundation && git commit -m "chore: pin foundation to v1.0.0"
 ```
 
 **To update the foundation later:**
@@ -244,6 +252,102 @@ bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/my-second-agent
 # Register a new SGP policy for it
 bash foundation/scripts/create_sgp_policy.sh
 ```
+
+---
+
+## Path C — Local to GCP (No GitHub Repo Required)
+
+Best for local development, solo developers, prototyping, or teams using
+a VCS other than GitHub. Your agent is just a folder on your machine.
+
+```
+~/tools/agw-foundation/          ← plain git clone (not a submodule)
+  └── terraform.tfvars           ← ONLY file you fill in
+
+~/projects/my-agent/             ← your agent, anywhere on your machine
+  ├── agent.py
+  └── requirements.txt
+```
+
+### C-1 — Clone the foundation anywhere
+
+```bash
+git clone https://github.com/OWNER/Agent-Gateway-Foundation.git ~/tools/agw-foundation
+cd ~/tools/agw-foundation
+cp terraform.tfvars.example terraform.tfvars
+```
+
+No parent repo gitignore needed — `terraform.tfvars` is already gitignored inside the foundation.
+
+### C-2 — Use absolute AGENT_PATH in anchor comments
+
+```hcl
+# FOUNDATION_ROOT: /home/yourname/tools/agw-foundation
+# AGENT_PATH: /home/yourname/projects/my-agent    ← ABSOLUTE path, not relative
+# DEPLOY_TARGET: reasoning_engine
+
+project_id = "your-project-id"
+# ... rest of fields same as Path B
+```
+
+> [!IMPORTANT]
+> Always use an **absolute path** for `AGENT_PATH` in Path C.
+> The foundation and your agent are in unrelated directories — a relative
+> path has no shared anchor. Antigravity reads this absolute path to find
+> and edit your agent files even though they are outside the workspace root.
+
+### C-3 — Deploy infrastructure
+
+```bash
+cd ~/tools/agw-foundation
+terraform init && terraform apply -auto-approve
+```
+
+### C-4 — Deploy your agent
+
+```bash
+# Absolute path works from any directory
+bash ~/tools/agw-foundation/scripts/deploy_chat_agent.sh \
+  --agent-path ~/projects/my-agent
+```
+
+The script writes `~/projects/my-agent/.env`. If you later add your agent to a repo:
+```bash
+echo ".env" >> ~/projects/my-agent/.gitignore
+```
+
+**Cloud Run path:**
+```bash
+cd ~/tools/agw-foundation
+INGRESS=$(terraform output -raw ingress_gateway 2>/dev/null)
+EGRESS=$(terraform output -raw egress_gateway 2>/dev/null)
+gcloud run services update YOUR_SERVICE \
+  --region="$(terraform output -raw location)" \
+  --set-env-vars="AGENT_GATEWAY_INGRESS=$INGRESS,AGENT_GATEWAY_EGRESS=$EGRESS"
+```
+
+### C-5 — Wire Antigravity skills
+
+```bash
+mkdir -p ~/.gemini/config/skills
+for d in ~/tools/agw-foundation/skills/*/; do
+  ln -sf "$d" ~/.gemini/config/skills/"$(basename $d)"
+done
+```
+
+Open `~/tools/agw-foundation/` as your Antigravity workspace.
+Antigravity reads the absolute `AGENT_PATH` in `terraform.tfvars` and
+can edit your agent files even though they live outside the workspace root.
+
+### C-6 — Update the foundation
+
+```bash
+cd ~/tools/agw-foundation
+git pull origin main            # or: git checkout v1.1.0
+terraform apply -auto-approve   # only changed resources re-apply
+```
+
+No submodule commit needed — it's a standalone clone.
 
 ---
 
