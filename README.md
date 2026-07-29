@@ -77,7 +77,7 @@ gcloud auth login
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/YOUR_ORG/Agent-Gateway-Foundation.git
+git clone https://github.com/GCP-Architecture-Guides/Agent-Gateway-Foundation.git
 cd Agent-Gateway-Foundation
 
 cp terraform.tfvars.example terraform.tfvars
@@ -158,7 +158,7 @@ bash destroy_all.sh
 
 ```bash
 # From your existing repo root
-git submodule add https://github.com/YOUR_ORG/Agent-Gateway-Foundation.git foundation
+git submodule add https://github.com/GCP-Architecture-Guides/Agent-Gateway-Foundation.git foundation
 git commit -m "feat: add Agent-Gateway-Foundation as submodule"
 
 # Pin to a release
@@ -261,7 +261,7 @@ a VCS other than GitHub. Your agent code is just a folder on your machine.
 
 ```bash
 # Clone to any directory — this is standalone, not a submodule
-git clone https://github.com/YOUR_ORG/Agent-Gateway-Foundation.git ~/tools/agw-foundation
+git clone https://github.com/GCP-Architecture-Guides/Agent-Gateway-Foundation.git ~/tools/agw-foundation
 cd ~/tools/agw-foundation
 
 cp terraform.tfvars.example terraform.tfvars
