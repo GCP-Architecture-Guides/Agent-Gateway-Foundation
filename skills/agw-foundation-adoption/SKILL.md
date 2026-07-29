@@ -3,9 +3,9 @@ name: agw-foundation-adoption
 description: >
   Use this skill when onboarding a new team to the Agent-Gateway-Foundation.
   Covers all three adoption paths: Path A (standalone new project), Path B
-  (git submodule sidecar in existing repo), and Path C (local project to GCP,
-  no GitHub repo required). Documents terraform.tfvars anchor comments,
-  --agent-path flag, Antigravity skills symlink, multi-agent deploy,
+  (git submodule sidecar in existing repo), and Path C (gitignored subfolder
+  in team repo — one-time clone, no submodule). Documents terraform.tfvars
+  anchor comments, --agent-path flag, Antigravity skills symlink,
   multi-agent deploy, and foundation update patterns. Read this before
   touching any config or deploy commands.
 ---
@@ -23,7 +23,7 @@ description: >
 |---|---|
 | **A — Standalone** | New GCP project, no existing agent code — clone and go |
 | **B — Sidecar** | Existing GitHub repo with existing agent — git submodule |
-| **C — Local to GCP** | Local project, no GitHub repo — plain clone + absolute `--agent-path` |
+| **C — Gitignored Subfolder** | Existing repo, no submodule complexity — one-time clone into `foundation/`, gitignored, relative paths |
 
 ---
 
@@ -54,7 +54,7 @@ Antigravity acts as the integration layer: it reads Terraform outputs from
 
 ```bash
 # From your existing repo root
-git submodule add https://github.com/OWNER/Agent-Gateway-Foundation.git foundation
+git submodule add https://github.com/GCP-Architecture-Guides/Agent-Gateway-Foundation.git foundation
 git commit -m "feat: add Agent-Gateway-Foundation as submodule"
 
 # Pin to a stable release (recommended for production)
@@ -106,7 +106,7 @@ Add three anchor comments at the top so Antigravity knows your repo layout:
 ```hcl
 # FOUNDATION_ROOT: foundation/
 # AGENT_PATH: src/my-agent
-# DEPLOY_TARGET: reasoning_engine   # or: cloud_run
+# DEPLOY_TARGET: reasoning_engine
 
 # ── Required fields ───────────────────────────────────────────────────────────
 project_id      = "your-gcp-project-id"
@@ -114,7 +114,7 @@ organization_id = "123456789012"        # GCP org ID — needed for org policies
 location        = "us-east1"
 prefix          = "myteam"             # short, no spaces (e.g. "acme-ml")
 
-agent_name        = "my-agent"
+agent_name        = "my_agent"
 agent_description = "What this agent does."
 
 allowed_egress_hosts = [
@@ -180,7 +180,7 @@ terraform -chdir=foundation output -json
 
 ## Step 6 — Deploy Your Agent
 
-### Option A: Reasoning Engine (Vertex AI ADK)
+### Deploy — Reasoning Engine (Vertex AI Agent Engine)
 
 ```bash
 # Your agent code stays in src/my-agent/ — pass the path to the deploy script
@@ -333,7 +333,6 @@ cp foundation/terraform.tfvars.example foundation/terraform.tfvars
 ```
 
 ---
-
 
 ## Common First-Deploy Failures
 

@@ -229,7 +229,6 @@ bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/my-agent
 > Add `src/my-agent/.env` to your `.gitignore` — it contains live project
 > credentials and is regenerated on every deploy.
 
-
 ### 6. Update the foundation
 
 ```bash
@@ -309,7 +308,6 @@ terraform -chdir=foundation apply -auto-approve
 ```bash
 bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/my-agent
 ```
-
 
 ### 5. Wire Antigravity skills (once per developer)
 
