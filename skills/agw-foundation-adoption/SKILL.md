@@ -255,99 +255,97 @@ bash foundation/scripts/create_sgp_policy.sh
 
 ---
 
-## Path C — Local to GCP (No GitHub Repo Required)
+## Path C — Gitignored Subfolder (No Submodule Complexity)
 
-Best for local development, solo developers, prototyping, or teams using
-a VCS other than GitHub. Your agent is just a folder on your machine.
+Your team repo tracks agent code. The foundation is cloned inside it,
+gitignored — never pushed. One workspace for Antigravity, relative paths,
+new developers onboard with `bash setup.sh`.
 
 ```
-~/tools/agw-foundation/          ← plain git clone (not a submodule)
-  └── terraform.tfvars           ← ONLY file you fill in
-
-~/projects/my-agent/             ← your agent, anywhere on your machine
-  ├── agent.py
-  └── requirements.txt
+my-team-repo/                ← team repo (pushed to GitHub)
+  ├── src/my-agent/          ← agent code (tracked)
+  ├── setup.sh               ← copy from foundation/template/setup.sh
+  ├── .gitignore             ← includes "foundation/"
+  └── foundation/            ← plain clone (gitignored, never pushed)
+        └── terraform.tfvars ← also gitignored by foundation itself
 ```
 
-### C-1 — Clone the foundation anywhere
+### C-1 — Add to your team repo's .gitignore
+
+```gitignore
+foundation/
+src/my-agent/.env
+```
+
+### C-2 — Copy setup.sh to your team repo root
+
+Copy `foundation/template/setup.sh` into your team repo root and edit
+`FOUNDATION_VERSION` to pin the version you want. Commit it:
 
 ```bash
-git clone https://github.com/OWNER/Agent-Gateway-Foundation.git ~/tools/agw-foundation
-cd ~/tools/agw-foundation
-cp terraform.tfvars.example terraform.tfvars
+cp foundation/template/setup.sh ./setup.sh
+# Edit FOUNDATION_VERSION if needed
+git add setup.sh .gitignore
+git commit -m "feat: add Agent-Gateway-Foundation setup script"
+git push
 ```
 
-No parent repo gitignore needed — `terraform.tfvars` is already gitignored inside the foundation.
+### C-3 — New developer onboarding (one command)
 
-### C-2 — Use absolute AGENT_PATH in anchor comments
+```bash
+git clone https://github.com/my-team/my-agent-repo.git
+cd my-agent-repo
+bash setup.sh   # clones foundation at pinned version, creates tfvars, links skills
+# fill in foundation/terraform.tfvars
+```
+
+Supports re-run with `--upgrade` flag after bumping `FOUNDATION_VERSION`.
+
+### C-4 — Configure terraform.tfvars
+
+Anchor comments use relative paths — identical for every developer:
 
 ```hcl
-# FOUNDATION_ROOT: /home/yourname/tools/agw-foundation
-# AGENT_PATH: /home/yourname/projects/my-agent    ← ABSOLUTE path, not relative
+# FOUNDATION_ROOT: foundation/
+# AGENT_PATH: src/my-agent       ← relative, not absolute
 # DEPLOY_TARGET: reasoning_engine
 
 project_id = "your-project-id"
 # ... rest of fields same as Path B
 ```
 
-> [!IMPORTANT]
-> Always use an **absolute path** for `AGENT_PATH` in Path C.
-> The foundation and your agent are in unrelated directories — a relative
-> path has no shared anchor. Antigravity reads this absolute path to find
-> and edit your agent files even though they are outside the workspace root.
-
-### C-3 — Deploy infrastructure
+### C-5 — Deploy infrastructure
 
 ```bash
-cd ~/tools/agw-foundation
-terraform init && terraform apply -auto-approve
+terraform -chdir=foundation init
+terraform -chdir=foundation apply -auto-approve
 ```
 
-### C-4 — Deploy your agent
+### C-6 — Deploy your agent
 
 ```bash
-# Absolute path works from any directory
-bash ~/tools/agw-foundation/scripts/deploy_chat_agent.sh \
-  --agent-path ~/projects/my-agent
-```
-
-The script writes `~/projects/my-agent/.env`. If you later add your agent to a repo:
-```bash
-echo ".env" >> ~/projects/my-agent/.gitignore
+# Relative path works — foundation/ and src/ are siblings in the same repo
+bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/my-agent
 ```
 
 **Cloud Run path:**
 ```bash
-cd ~/tools/agw-foundation
-INGRESS=$(terraform output -raw ingress_gateway 2>/dev/null)
-EGRESS=$(terraform output -raw egress_gateway 2>/dev/null)
+INGRESS=$(terraform -chdir=foundation output -raw ingress_gateway 2>/dev/null)
+EGRESS=$(terraform -chdir=foundation output -raw egress_gateway 2>/dev/null)
 gcloud run services update YOUR_SERVICE \
-  --region="$(terraform output -raw location)" \
+  --region="$(terraform -chdir=foundation output -raw location)" \
   --set-env-vars="AGENT_GATEWAY_INGRESS=$INGRESS,AGENT_GATEWAY_EGRESS=$EGRESS"
 ```
 
-### C-5 — Wire Antigravity skills
+### C-7 — Update the foundation
+
+Bump `FOUNDATION_VERSION` in `setup.sh` in your team repo, commit, push.
+Each developer then runs:
 
 ```bash
-mkdir -p ~/.gemini/config/skills
-for d in ~/tools/agw-foundation/skills/*/; do
-  ln -sf "$d" ~/.gemini/config/skills/"$(basename $d)"
-done
+bash setup.sh --upgrade         # re-clones at new version
+terraform -chdir=foundation apply -auto-approve
 ```
-
-Open `~/tools/agw-foundation/` as your Antigravity workspace.
-Antigravity reads the absolute `AGENT_PATH` in `terraform.tfvars` and
-can edit your agent files even though they live outside the workspace root.
-
-### C-6 — Update the foundation
-
-```bash
-cd ~/tools/agw-foundation
-git pull origin main            # or: git checkout v1.1.0
-terraform apply -auto-approve   # only changed resources re-apply
-```
-
-No submodule commit needed — it's a standalone clone.
 
 ---
 
