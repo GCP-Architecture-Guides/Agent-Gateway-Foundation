@@ -474,7 +474,28 @@ echo "✅ $(ls skills/ 2>/dev/null || ls foundation/skills/) skills linked"
 
 ---
 
+## Optional — VPC Service Controls (VPC-SC)
+
+If your project must live inside a VPC-SC perimeter, Agent Gateway provisioning
+requires 8 ingress rules to allow its control-plane service agents through the
+perimeter boundary. This is a **one-time manual step** before running `deploy_all.sh`.
+
+```
+1. Create VPC-SC perimeter + add your project  ← you do manually
+2. bash scripts/setup_vpc_sc_ingress.sh \
+     --policy-id YOUR_POLICY_ID \
+     --perimeter YOUR_PERIMETER_NAME           ← script handles all 8 rules
+3. Wait 5–15 min for VPC-SC propagation
+4. bash deploy_all.sh                          ← unchanged, works as normal
+```
+
+Full root cause explanation, step-by-step setup, and troubleshooting:
+→ **[docs/VPC_SC.md](docs/VPC_SC.md)**
+
+---
+
 ## Config Flow — Where Values Come From
+
 
 Everything flows from one file. Nothing is hardcoded anywhere else.
 
