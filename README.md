@@ -40,7 +40,7 @@ Every agent deployed through this foundation gets:
 | **IAP (optional)** | Centralized caller identity enforcement at the gateway (REQUEST_AUTHZ, global `iap.googleapis.com`) |
 | **Observability** | Token usage dashboard, latency alerts, log-based metrics — wired automatically |
 | **GatewayAgent SDK** | One import replaces all boilerplate in your `agent.py` |
-| **8 Antigravity Skills** | Your AI coding assistant knows exactly how to set up and maintain every layer |
+| **8 Antigravity Skills** | Your AI coding assistant knows exactly how to set up, maintain, and extend every layer (incl. A2A multi-agent) |
 
 ---
 
@@ -469,8 +469,8 @@ echo "✅ $(ls skills/ 2>/dev/null || ls foundation/skills/) skills linked"
 | `sgp-network-authz-pattern` | "Set up the SGP policy engine" |
 | `sgp-policy-rules` | "Add/change what my agent is allowed to discuss" |
 | `agent-gateway-deploy-patch` | "RE deploy fails with code 13 / org policy error" |
-| `cloud-run-deploy-guardrails` | "Deploy my backend to Cloud Run with IAP" |
 | `vertex-ai-global-endpoint-adk` | "My agent returns 404 for the model" |
+| `a2a-agent-runtime` | "Deploy multi-agent A2A" / "RemoteA2aAgent / A2aAgent errors" / "a2a-sdk gotchas" |
 
 ---
 
