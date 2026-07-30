@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gateway-agent-sdk"
+version = "1.0.0"
+description = "GatewayAgent SDK — ADK wrapper enforcing Agent Gateway compliance (GlobalGemini routing, OTEL telemetry, org policy patch)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+keywords = ["google-cloud", "agent-gateway", "vertex-ai", "adk", "model-armor"]
+
+# IMPORTANT: These versions are pinned to the known-working combination.
+# Do NOT change without full E2E testing. See KNOWN_ISSUES.md #008.
+# google-adk==1.31.1 + google-cloud-aiplatform==1.149.0 is the only
+# validated combination for the .pth gateway inject pattern.
+dependencies = [
+  "google-adk==1.31.1",
+  "google-cloud-aiplatform[adk,agent_engines]==1.149.0",
+  "opentelemetry-api>=1.20.0,<2.0.0",
+  "opentelemetry-sdk>=1.20.0,<2.0.0",
+  "google-auth>=2.0.0",
+  "requests>=2.28.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0",
+  "pytest-asyncio>=0.21",
+  "build",
+  "twine",
+]
+
+[tool.setuptools]
+# Explicit package declaration required for flat layout (files are in '.' not in a 'gateway_agent/' subdir).
+# Matches the legacy setup.py: packages=['gateway_agent'], package_dir={'gateway_agent': ''}
+packages = ["gateway_agent"]
+
+[tool.setuptools.package-dir]
+"gateway_agent" = "."

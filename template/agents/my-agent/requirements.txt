@@ -1,0 +1,17 @@
+# CRITICAL: These versions are pinned to the known-working combination.
+# Do NOT change without full E2E testing. See KNOWN_ISSUES.md in the
+# mod-agw-foundation repo for root cause.
+
+# --- Gateway Agent SDK (from Artifact Registry) ---
+# Replace YOUR_PROJECT_ID and REGION with the project where the SDK was published.
+# Run: bash scripts/publish_sdk.sh  (from mod-agw-foundation root) to publish first.
+--extra-index-url https://REGION-python.pkg.dev/YOUR_SDK_PROJECT_ID/agw-python-packages/simple/
+gateway-agent-sdk==1.0.0
+
+# --- Core ADK (must match SDK pins exactly) ---
+google-adk==1.31.1
+google-cloud-aiplatform[adk,agent_engines]==1.149.0
+
+# --- Add your agent's dependencies below ---
+# requests==2.32.3
+# google-cloud-bigquery==3.25.0
