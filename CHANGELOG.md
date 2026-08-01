@@ -12,6 +12,44 @@ Consuming teams should pin to a tag: `?ref=v1.0.0`
 
 ---
 
+## [v1.0.2] — 2026-08-01
+
+### Bug Fixes
+
+#### Infrastructure (Terraform)
+- **IAP service extension** (`03_security_and_gateways.tf`) — Corrected a
+  fundamental design error: the IAP authz extension was gated behind
+  `iap_enabled = false` as if it were for user authentication. IAP in the
+  Agent Gateway context validates **service identity** (RE→RE, Cloud Run→RE).
+  The extension and its `REQUEST_AUTHZ` ingress policy are now **always created**.
+- **Auto-grant for RE service agent** — Added unconditional
+  `roles/iap.httpsResourceAccessor` grant to
+  `service-PROJECT_NUMBER@gcp-sa-aiplatform-re.iam.gserviceaccount.com` so
+  Reasoning Engines can call through the gateway without manual IAM setup.
+- **Gateway SA Model Armor access** — Added `roles/modelarmor.inspector`
+  grant to the gateway's `gcp-sa-dep` service account. Without this, the
+  gateway cannot invoke the MA extension and all requests fail with 403.
+- **SGP ingress policy** (NEW) — Added `ran-sgp-ingress-policy` targeting
+  the ingress gateway, mirroring the existing egress SGP policy. Inbound
+  prompts are now screened by SGP before reaching any agent.
+- **Removed `iap_enabled` variable** — No longer needed. `iap_allowed_members`
+  now controls only additional callers beyond the auto-granted RE service agent.
+
+### Breaking Changes
+- `iap_enabled` variable removed. Remove it from `terraform.tfvars` if set.
+  The IAP extension is now unconditional; `iap_allowed_members` controls extras.
+
+### Upgrade Path
+```bash
+# If iap_enabled = true was in terraform.tfvars:
+#   1. Remove the iap_enabled line
+#   2. terraform apply  (creates iap_extension + grants as new resources)
+# If iap_enabled = false (default):
+#   1. terraform apply  (creates 4 new resources — no state conflict)
+```
+
+---
+
 ## [v1.0.1] — 2026-07-29
 
 ### Bug Fixes
@@ -58,7 +96,8 @@ Consuming teams should pin to a tag: `?ref=v1.0.0`
 - No breaking changes to `terraform.tfvars` schema
 - No breaking changes to `deploy_all.sh`, `destroy_all.sh`, or SDK API
 - `--phases` flag is additive; omitting it runs all phases (backwards compatible)
-- IAP support requires `iap_enabled = true` in tfvars (opt-in, default false)
+- IAP service extension is now always created (service identity validation is unconditional)
+  `iap_enabled` was removed; `iap_allowed_members` controls additional callers only
 
 ---
 

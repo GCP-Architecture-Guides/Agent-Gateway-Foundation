@@ -425,36 +425,28 @@ variable "sgp_nlc_constraint" {
 
 # ==============================================================================
 # IAP (Identity-Aware Proxy) — Ingress Identity Enforcement
-# Configures IAP as a REQUEST_AUTHZ extension on the ingress gateway.
-# IAP verifies the caller's Google identity before Model Armor content checks.
-# This is the centralized identity door for ALL agents behind this gateway.
-# Distinct from Vertex AI IAM (per-RE) — IAP applies at the gateway level.
-# Pattern: authz_extension (service=iap.googleapis.com) + REQUEST_AUTHZ policy
-# Note: callers must have roles/iap.httpsResourceAccessor in iap_allowed_members.
+# ==============================================================================
+# IAP — Ingress Service Identity
+# ==============================================================================
+# The IAP authz extension is always created. It validates SERVICE identity
+# (not user identity) on inbound requests to the ingress gateway.
+# The Vertex AI RE service agent is auto-granted IAP access (no config needed).
+# Use iap_allowed_members to grant additional callers (other services, teams).
 # ==============================================================================
 
 variable "iap_allowed_members" {
   description = <<-EOT
-    List of identities granted roles/iap.httpsResourceAccessor on the Agent Gateway.
-    Only these identities can invoke Reasoning Engines through the ingress gateway.
-    Use standard IAM member format:
-      - "user:alice@example.com"
+    Additional identities granted roles/iap.httpsResourceAccessor on the Agent Gateway.
+    The Vertex AI RE service agent is auto-granted and does NOT need to be listed here.
+    Use this for:
+      - Extra service accounts (e.g. Cloud Run, other pipelines)
+      - Specific users or groups that call the gateway directly
+    Standard IAM member format:
       - "serviceAccount:my-sa@project.iam.gserviceaccount.com"
+      - "user:alice@example.com"
       - "group:my-team@example.com"
-    Leave empty ([]) to skip the IAM binding (add manually via Console instead).
+    Leave empty ([]) if no additional callers are needed beyond the auto-granted RE SA.
   EOT
   type        = list(string)
   default     = []
-}
-
-variable "iap_enabled" {
-  description = <<-EOT
-    Set to true to deploy the IAP authz extension on the ingress gateway.
-    When false (default), the IAP extension and policy resources are not created.
-    The ingress gateway still enforces Model Armor content policies.
-    IAP adds identity-layer enforcement on top — only iap_allowed_members
-    can invoke Reasoning Engines through the gateway.
-  EOT
-  type        = bool
-  default     = false
 }

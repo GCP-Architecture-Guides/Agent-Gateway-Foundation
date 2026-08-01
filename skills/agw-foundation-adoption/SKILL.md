@@ -421,33 +421,38 @@ this gateway?" before content policies (Model Armor, SGP) ever run.
 | When enforced | At RE invocation | Before content policies (Model Armor, SGP) |
 | Value | Per-resource access control | Single centralized identity door |
 
-### How to Enable
+### IAP Is Always On (Service Identity)
 
-Add to `terraform.tfvars` and run `terraform apply`:
+The IAP service extension is **always created** — no `terraform.tfvars` change needed.
+It validates **service identity**, not user identity. The Vertex AI RE service agent
+(`service-PROJECT_NUMBER@gcp-sa-aiplatform-re.iam.gserviceaccount.com`) is auto-granted,
+enabling RE→RE calls through the gateway without any configuration.
+
+To grant access to **additional callers** (Cloud Run SA, other pipelines, specific users),
+add to `terraform.tfvars`:
 
 ```hcl
-iap_enabled = true
 iap_allowed_members = [
+  "serviceAccount:my-cloud-run-sa@my-project.iam.gserviceaccount.com",
   "user:alice@example.com",
-  "serviceAccount:my-sa@my-project.iam.gserviceaccount.com",
   "group:ai-team@example.com",
 ]
 ```
 
-This creates:
-1. An authz extension → `iap.googleapis.com` with `iapPolicyVersion = "V1"` metadata
-2. A `REQUEST_AUTHZ` policy on the ingress gateway (not CONTENT_AUTHZ — different from SGP/MA)
-3. An IAM binding: `roles/iap.httpsResourceAccessor` for each member
+This adds `roles/iap.httpsResourceAccessor` to those identities on top of the
+auto-granted RE service agent.
 
-### Request Flow With IAP Enabled
+### Request Flow
 
 ```
-Caller
+Caller (RE, Cloud Run, or iap_allowed_members identity)
   ↓
 Ingress Gateway
-  ├── REQUEST_AUTHZ (IAP)     ← "is this caller in iap_allowed_members?"
+  ├── REQUEST_AUTHZ (IAP)     ← "is this caller a valid Google service identity?"
   ↓  ALLOW
-Content policies (Model Armor) ← "is this content safe?"
+  ├── CONTENT_AUTHZ (SGP)     ← "is this prompt allowed by governance policy?"
+  ↓  ALLOW
+  ├── CONTENT_AUTHZ (MA)      ← "is this content safe?"
   ↓  ALLOW
 Reasoning Engine
 ```

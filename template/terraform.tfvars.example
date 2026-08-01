@@ -61,16 +61,15 @@ org_monitored_project_ids = [
   # "data-platform-project-id",
 ]
 
-# ── IAP (Identity-Aware Proxy) — Ingress Identity Enforcement (optional) ───
-# Set iap_enabled = true to add identity-layer enforcement on the ingress gateway.
-# IAP acts as the centralized identity door for ALL agents behind this gateway.
-# Pattern: REQUEST_AUTHZ authz_extension → iap.googleapis.com (global endpoint).
-# Distinct from Vertex AI IAM (per-RE) — IAP applies at the gateway level.
-# Callers must have roles/iap.httpsResourceAccessor to pass the IAP check.
+# ── IAP — Additional Caller Access (optional) ──────────────────────────────
+# The IAP service extension is always created — it validates SERVICE identity
+# (not user identity) on every inbound request to the ingress gateway.
+# The Vertex AI RE service agent is auto-granted; no config needed for RE→RE calls.
 #
-# iap_enabled = true
+# Add iap_allowed_members only if you need ADDITIONAL callers beyond the auto-granted SA:
 # iap_allowed_members = [
+#   "serviceAccount:my-cloud-run-sa@my-project.iam.gserviceaccount.com",
 #   "user:alice@example.com",
-#   "serviceAccount:my-agent-sa@my-project.iam.gserviceaccount.com",
 #   "group:ai-team@example.com",
 # ]
+

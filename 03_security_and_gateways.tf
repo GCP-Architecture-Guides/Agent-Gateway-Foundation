@@ -327,39 +327,39 @@ resource "google_network_security_authz_policy" "egress_sgp_policy" {
 # agentGatewayConfig.clientToAgentConfig binding set during agent deployment.
 
 # ==============================================================================
-# IAP (Identity-Aware Proxy) — Ingress Identity Enforcement
+# IAP (Identity-Aware Proxy) — Ingress SERVICE Identity Enforcement
 # ==============================================================================
-# Gated by var.iap_enabled (default: false).
-# Set iap_enabled = true in terraform.tfvars to enforce that only
-# iap_allowed_members can call the Agent Gateway.
+# The IAP authz extension validates SERVICE identity — it ensures that any
+# caller (Reasoning Engine, Cloud Run service, or authorised service account)
+# presents a valid Google-signed IAP bearer token before content policies
+# (Model Armor / SGP) are evaluated.
 #
-# Purpose: IAP at the gateway level is the CENTRALIZED identity control for ALL
-# agents behind this gateway. It answers "is this caller allowed to use this
-# gateway?" before content policies (Model Armor / SGP) are evaluated.
-# This complements — not replaces — Vertex AI IAM (which is per-RE).
+# This is NOT user-facing IAP. It operates at the service-to-service layer:
+#   - RE calling another RE through the gateway
+#   - Cloud Run calling an agent endpoint
+#   - Any service that holds a Google identity
 #
 # Recommended combined pattern (from official docs):
-#   REQUEST_AUTHZ policy (IAP)   → who can access the gateway
+#   REQUEST_AUTHZ policy (IAP)   → who (which service) can reach the gateway
 #   CONTENT_AUTHZ policy (MA)    → what content is allowed through
 #
-# Per official docs (docs.cloud.google.com/gemini-enterprise-agent-platform/
-#   govern/gateways/delegate-authorization#configure-authz-iap):
+# Per official docs:
 #   - service: iap.googleapis.com  (global, NOT a regional REP endpoint)
 #   - policy_profile: REQUEST_AUTHZ
-#   - metadata.iapPolicyVersion: "V1"  (required — extension will fail without it)
+#   - metadata.iapPolicyVersion: "V1"  (required — extension rejects without it)
 #
-# Dependency chain:
-#   google_project_service.iap
-#     → google_network_services_authz_extension.iap_extension
-#       → google_network_security_authz_policy.ingress_iap_policy
-#   google_project_iam_member.iap_accessor  (parallel — grants caller access)
+# Auto-granted callers (always):
+#   - Vertex AI RE service agent (service-PROJECT_NUMBER@gcp-sa-aiplatform-re)
+#     This SA runs inside every Reasoning Engine — grants RE→RE gateway calls.
+#
+# Additional callers: set iap_allowed_members in terraform.tfvars.
+#   Use serviceAccount:, user:, or group: format.
 # ==============================================================================
 
-# IAP Authz Extension — delegates access decisions to IAP
+# IAP Authz Extension — always created (service identity validation is always needed)
 # Note: iapPolicyVersion = "V1" is REQUIRED in metadata per the official spec.
-# Fail-closed behavior (deny if IAP unreachable) is the API default for authz extensions.
+# Fail-closed behavior (deny if IAP unreachable) is the API default.
 resource "google_network_services_authz_extension" "iap_extension" {
-  count    = var.iap_enabled ? 1 : 0
   provider = google-beta
 
   name     = "${var.prefix}-iap-extension"
@@ -371,17 +371,16 @@ resource "google_network_services_authz_extension" "iap_extension" {
   timeout  = "1s"
 
   metadata = {
-    iapPolicyVersion = "V1" # Required — extension will reject requests without this
+    iapPolicyVersion = "V1" # Required — extension rejects requests without this
   }
 
   depends_on = [google_project_service.iap]
 }
 
 # IAP Authz Policy — attaches the IAP extension to the INGRESS gateway.
-# Profile: REQUEST_AUTHZ — IAP verifies caller identity on every inbound request.
-# (Distinct from CONTENT_AUTHZ used by Model Armor, which inspects request body)
+# Profile: REQUEST_AUTHZ — IAP verifies caller service identity on every inbound request.
+# (Distinct from CONTENT_AUTHZ used by Model Armor, which inspects the request body)
 resource "google_network_security_authz_policy" "ingress_iap_policy" {
-  count    = var.iap_enabled ? 1 : 0
   provider = google-beta
 
   name           = "${var.prefix}-iap-ingress-policy"
@@ -389,7 +388,7 @@ resource "google_network_security_authz_policy" "ingress_iap_policy" {
   project        = var.project_id
 
   action         = "CUSTOM"
-  policy_profile = "REQUEST_AUTHZ" # Identity-based check (not PRINCIPAL_AUTHZ)
+  policy_profile = "REQUEST_AUTHZ"
 
   target {
     resources = [google_network_services_agent_gateway.ingress_gateway.id]
@@ -397,18 +396,83 @@ resource "google_network_security_authz_policy" "ingress_iap_policy" {
 
   custom_provider {
     authz_extension {
-      resources = [google_network_services_authz_extension.iap_extension[0].id]
+      resources = [google_network_services_authz_extension.iap_extension.id]
     }
   }
 
   depends_on = [google_network_services_authz_extension.iap_extension]
 }
 
-# Grant allowed identities the IAP accessor role so they pass the extension check
+# ==============================================================================
+# IAP IAM GRANTS
+# ==============================================================================
+# Auto-grant 1: Vertex AI RE service agent
+# Every Reasoning Engine runs as this SA — allows RE→gateway calls without
+# any manual configuration. Format: service-PROJECT_NUMBER@gcp-sa-aiplatform-re
+# Note: The SA is created when the aiplatform API is enabled, before the first
+# RE is deployed. Granting IAM here is safe and idempotent.
+resource "google_project_iam_member" "re_service_agent_iap_accessor" {
+  project = var.project_id
+  role    = "roles/iap.httpsResourceAccessor"
+  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+
+  depends_on = [google_project_service.iap]
+}
+
+# Optional: additional callers configured in iap_allowed_members (terraform.tfvars).
+# Use this for: extra service accounts, Cloud Run SA, specific teams, etc.
+# The Vertex AI RE service agent above is auto-granted and does NOT need repeating here.
 resource "google_project_iam_member" "iap_accessor" {
-  for_each = var.iap_enabled ? toset(var.iap_allowed_members) : toset([])
+  for_each = toset(var.iap_allowed_members)
 
   project = var.project_id
   role    = "roles/iap.httpsResourceAccessor"
   member  = each.value
+
+  depends_on = [google_project_service.iap]
+}
+
+# ==============================================================================
+# GATEWAY SERVICE ACCOUNT — MODEL ARMOR ACCESS
+# ==============================================================================
+# The Agent Gateway uses a Google-managed service account
+# (service-PROJECT_NUMBER@gcp-sa-dep.iam.gserviceaccount.com) to call authz
+# extensions. This SA must have roles/modelarmor.inspector so it can invoke
+# the Model Armor screening API on behalf of the gateway.
+# Without this grant, the MA extension call returns 403 and all gateway
+# requests fail with PERMISSION_DENIED at the authz extension stage.
+resource "google_project_iam_member" "gateway_sa_modelarmor_inspector" {
+  project = var.project_id
+  role    = "roles/modelarmor.inspector"
+  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-dep.iam.gserviceaccount.com"
+
+  depends_on = [google_project_service.modelarmor]
+}
+
+# ==============================================================================
+# SGP INGRESS POLICY
+# ==============================================================================
+# Mirrors the egress SGP policy but applies to the INGRESS gateway.
+# Screens inbound prompts through the SGP engine before they reach any agent.
+# Together with egress SGP, this closes the full loop:
+#   ingress SGP: inbound prompt screening (what is being asked)
+#   egress SGP:  outbound response screening (what goes back to the caller)
+# Note: CONTENT_AUTHZ + sgp.internal.gemini-corp does NOT support http_rules.
+resource "google_network_security_authz_policy" "ingress_sgp_policy" {
+  provider       = google-beta
+  name           = "${var.prefix}-sgp-ingress-policy"
+  location       = var.location
+  project        = var.project_id
+  action         = "CUSTOM"
+  policy_profile = "CONTENT_AUTHZ"
+
+  target {
+    resources = [google_network_services_agent_gateway.ingress_gateway.id]
+  }
+
+  custom_provider {
+    authz_extension {
+      resources = [google_network_services_authz_extension.sgp_extension.id]
+    }
+  }
 }

@@ -1,15 +1,13 @@
 ---
 name: a2a-agent-runtime
 description: >
-  Use this skill when deploying a multi-agent A2A (Agent-to-Agent) system on
-  Vertex AI Reasoning Engines using google-adk==1.31.1, google-cloud-aiplatform==1.149.0,
-  and a2a-sdk==1.1.2. Covers the complete workflow: redeploying specialist agents
-  as A2aAgent, building the orchestrator with RemoteA2aAgent, and the SDK-version-
-  specific gotchas discovered through real-world test deployment. MUST be read
-  before writing any a2a_config.py, executor.py, or orchestrator agent.py.
+  DEPRECATED — superseded by a2a-agent-deploy skill. This skill was validated
+  against google-adk==1.31.1 + google-cloud-aiplatform==1.149.0 (preview SDK path).
+  Those SDK versions and the preview import path are no longer correct. Use the
+  a2a-agent-deploy skill for all new deployments.
 ---
 
-# A2A Agent Runtime Skill
+# A2A Agent Runtime Skill — ⚠️ DEPRECATED
 
 <!-- Copyright 2025 Google LLC
 
@@ -28,7 +26,26 @@ limitations under the License.
 This code is for PoC environment only.
 This demo code is not built for production workload. -->
 
-## Overview
+> [!CAUTION]
+> **This skill is DEPRECATED and SUPERSEDED by `a2a-agent-deploy`.**
+>
+> The SDK versions, import paths, and executor patterns documented here are
+> **no longer correct** for google-cloud-aiplatform 1.163.0 + google-adk 2.5.0.
+> Specifically:
+> - The preview import path (`vertexai.preview.reasoning_engines.templates.a2a`)
+>   fails with `No module named 'a2a.server.apps'` on any released a2a-sdk.
+> - `AgentExecutor` as a base class causes `cannot pickle 'Descriptor' object`.
+> - `agent_executor=instance` (used here) should be `agent_executor_builder=Class`.
+> - `sse-starlette` requirement is missing.
+>
+> **Go to:** `skills/a2a-agent-deploy/SKILL.md`
+
+This file is retained as historical reference for the discovery timeline.
+Do not use these patterns in new deployments.
+
+---
+
+## Overview (Historical — Do Not Use)
 
 This skill documents deploying a multi-agent A2A system where:
 - **Specialists** are existing ADK/GatewayAgent Reasoning Engines, redeployed
