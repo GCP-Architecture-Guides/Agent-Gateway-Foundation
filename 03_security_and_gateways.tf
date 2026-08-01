@@ -149,7 +149,7 @@ resource "google_network_services_authz_extension" "ma_extension" {
         # gRPC-HTTP transcoding format (contentType/extensions metadata) that falsely triggers
         # the PI/Jailbreak filter. Model response safety is enforced by Gemini's built-in harm
         # filters at the model layer — these are always active and cannot be bypassed.
-        request_template_id = "projects/${var.project_id}/locations/${var.location}/templates/security-high"
+        request_template_id = google_model_armor_template.security_high.id
       }
     ])
   }
@@ -444,7 +444,9 @@ resource "google_project_iam_member" "re_service_agent_iap_accessor" {
   role    = "roles/iap.httpsResourceAccessor"
   member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
 
-  depends_on = [google_project_service.iap]
+  # depends on both: IAP API must be enabled AND aiplatform API must be enabled
+  # (the gcp-sa-aiplatform-re SA is created when aiplatform.googleapis.com is enabled)
+  depends_on = [google_project_service.iap, google_project_service.aiplatform]
 }
 
 # Optional: additional callers configured in iap_allowed_members (terraform.tfvars).

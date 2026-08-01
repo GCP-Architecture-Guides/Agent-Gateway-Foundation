@@ -399,6 +399,12 @@ User Request → Ingress Gateway → Reasoning Engine (agent)
 
 Key points:
 - SGP is enforced at the **egress gateway level** — covers ALL agents behind it
+- **SGP can ONLY be applied to the EGRESS gateway** — NOT the ingress gateway.
+  The Agent Gateway API enforces a hard limit: **at most 1 `CONTENT_AUTHZ` policy
+  per `CLIENT_TO_AGENT` (ingress) gateway**. The ingress slot is occupied by
+  Model Armor. Attempting to add SGP `CONTENT_AUTHZ` to the ingress gateway returns:
+  `"at most one CONTENT_AUTHZ AuthzPolicy is allowed for AgentGateway with
+  CLIENT_TO_AGENT access path: invalid argument"` — see `KNOWN_ISSUES.md #011`.
 - For gateway-level coverage, no per-agent `agents/` registry entries needed
 - `policyProfile: CONTENT_AUTHZ` tells the gateway this is a content evaluation
   policy (not just a network allow/deny)
@@ -631,6 +637,18 @@ with body: `{"name": "AGENT_NAME", "base_agent": "antigravity-preview-05-2026"}`
 6. **gcloud does NOT have `authz-extensions create`** — use REST API or
    Terraform for creating extensions. gcloud only supports `authz-policies`
    (via `import`, `describe`, `list`, `delete`).
+
+7. **DO NOT try to add SGP to the ingress gateway** — the Agent Gateway API
+   enforces a hard limit of at most 1 `CONTENT_AUTHZ` policy per
+   `CLIENT_TO_AGENT` (ingress) gateway. Model Armor occupies that slot.
+   Attempting to create a second `CONTENT_AUTHZ` policy on the ingress gateway
+   returns error code 3:
+   ```
+   at most one CONTENT_AUTHZ AuthzPolicy is allowed for AgentGateway
+   with CLIENT_TO_AGENT access path: invalid argument
+   ```
+   SGP governance is **egress-only** by platform design. Inbound prompt
+   screening relies exclusively on Model Armor on the ingress gateway.
 
 ---
 

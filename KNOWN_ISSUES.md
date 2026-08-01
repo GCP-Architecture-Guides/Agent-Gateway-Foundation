@@ -22,6 +22,8 @@ ones that failed), the final resolution, and a rollback procedure.
 | 007 | OTEL exporter SSL crash kills RE async thread after first query | 🔴 Critical | ✅ Fixed |
 | 008 | Unpinned SDK versions: `agentplatform.Client` transport bypasses all patch interceptors | 🔴 Critical | ✅ Fixed |
 | 009 | Invalid agent name `chat-agent` — hyphens not allowed; ADK requires Python identifier | 🔴 Critical | ✅ Fixed |
+| 010 | `roles/modelarmor.inspector` does not exist — cannot grant gateway SA MA access via IAM | 🟡 Medium | ✅ Documented (not needed) |
+| 011 | Agent Gateway API hard limit: at most 1 `CONTENT_AUTHZ` policy per `CLIENT_TO_AGENT` ingress gateway | 🟡 Medium | ✅ Documented (platform limit) |
 
 ---
 
@@ -609,3 +611,67 @@ bash deploy_all.sh
       different Pydantic `model` field type = `ValidationError: 1 validation error for
       GatewayAgent` = container startup crash = code 3 FAILED_TO_START.
     **Rule:** Any SDK version upgrade must be tested and pinned in BOTH locations simultaneously.
+
+---
+
+## Issue #010 — `roles/modelarmor.inspector` Does Not Exist at Project Scope
+
+**Status:** ✅ Documented — no IAM grant needed  
+**Discovered:** 2026-08-01 during `terraform apply` in `charter-poc-test`
+
+**Symptom:**
+```
+Error: Request `Create IAM Members roles/modelarmor.inspector
+serviceAccount:service-PROJECT_NUMBER@gcp-sa-dep.iam.gserviceaccount.com
+for project "..."` returned error:
+  "Role roles/modelarmor.inspector is not supported for this resource."
+  badRequest
+```
+
+**Root Cause:**  
+`roles/modelarmor.inspector` does not exist in GCP IAM. It was incorrectly assumed the gateway SA (`gcp-sa-dep`) needed an explicit IAM grant to call the Model Armor extension. In reality, the `gcp-sa-dep` service account is a Google-managed SA that operates within the Agent Gateway extension framework — it has implicit authorization to call the MA extension endpoint. No project-level IAM grant is needed or possible.
+
+**Resolution:**  
+Removed `google_project_iam_member.gateway_sa_modelarmor_inspector` from `03_security_and_gateways.tf`. Replaced with a comment explaining the implicit access pattern.
+
+**Rollback:** N/A — removing a resource that was rejected by the API. No rollback needed.
+
+---
+
+## Issue #011 — Agent Gateway API Limits CONTENT_AUTHZ to 1 Policy Per CLIENT_TO_AGENT Gateway
+
+**Status:** ✅ Documented — platform limitation  
+**Discovered:** 2026-08-01 during `terraform apply` in `charter-poc-test`
+
+**Symptom:**
+```
+Error waiting to create AuthzPolicy: Error code 3, message:
+  Failed to update tenant configuration for AgentGateway:
+  generic::invalid_argument: at most one CONTENT_AUTHZ AuthzPolicy is allowed
+  for AgentGateway ".../agentGateways/ran-ingress-gateway"
+  with CLIENT_TO_AGENT access path: invalid argument
+```
+
+**Root Cause:**  
+The Agent Gateway API enforces a hard limit: **at most one `CONTENT_AUTHZ` AuthzPolicy per gateway with `CLIENT_TO_AGENT` (ingress) access path**. The ingress gateway's single `CONTENT_AUTHZ` slot was already occupied by `ran-ma-policy` (Model Armor). Attempting to add a second `CONTENT_AUTHZ` policy for SGP (`ran-sgp-ingress-policy`) violated this constraint.
+
+Note: `REQUEST_AUTHZ` policies count separately and are NOT affected by this limit. The IAP `REQUEST_AUTHZ` policy on the ingress gateway is unaffected.
+
+**Complete Authz Policy Matrix (as of v1.0.2):**
+```
+Ingress gateway (CLIENT_TO_AGENT):
+  ├── REQUEST_AUTHZ → IAP  (service identity validation)      — allowed: unlimited
+  └── CONTENT_AUTHZ → MA   (prompt/content screening)        — max: 1 ← SLOT FULL
+
+Egress gateway (AGENT_TO_ANYWHERE):
+  ├── REQUEST_AUTHZ → IAP  (agent identity on outbound calls) — allowed: unlimited
+  ├── CONTENT_AUTHZ → MA   (AI call screening)               — max: unknown
+  └── CONTENT_AUTHZ → SGP  (semantic governance policy)      — max: unknown
+```
+
+**Resolution:**  
+Removed `google_network_security_authz_policy.ingress_sgp_policy`. SGP governance applies to **egress only** via `ran-sgp-egress-policy`. Inbound content screening relies on Model Armor on the ingress gateway. Documented as a platform constraint.
+
+**Workaround:**  
+None available through the Agent Gateway API. Full closure would require the API to support multiple `CONTENT_AUTHZ` policies per gateway direction — tracked for future platform release.
+

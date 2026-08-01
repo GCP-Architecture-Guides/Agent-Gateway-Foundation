@@ -55,12 +55,12 @@ output "egress_gateway_id" {
 
 # --- Gateway Names (resource paths for agentGatewayConfig — use these in RE deployments) ---
 output "ingress_gateway_name" {
-  value       = "projects/${var.project_id}/locations/${var.region}/agentGateways/${var.prefix}-ingress-gateway"
+  value       = "projects/${var.project_id}/locations/${var.location}/agentGateways/${var.prefix}-ingress-gateway"
   description = "Full resource path for agentGatewayConfig.clientToAgentConfig.agentGateway."
 }
 
 output "egress_gateway_name" {
-  value       = "projects/${var.project_id}/locations/${var.region}/agentGateways/${var.prefix}-egress-gateway"
+  value       = "projects/${var.project_id}/locations/${var.location}/agentGateways/${var.prefix}-egress-gateway"
   description = "Full resource path for agentGatewayConfig.agentToAnywhereConfig.agentGateway."
 }
 

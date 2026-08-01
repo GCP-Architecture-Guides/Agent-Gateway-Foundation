@@ -442,20 +442,29 @@ iap_allowed_members = [
 This adds `roles/iap.httpsResourceAccessor` to those identities on top of the
 auto-granted RE service agent.
 
-### Request Flow
+### Complete Authz Policy Matrix
 
 ```
-Caller (RE, Cloud Run, or iap_allowed_members identity)
-  ↓
-Ingress Gateway
-  ├── REQUEST_AUTHZ (IAP)     ← "is this caller a valid Google service identity?"
-  ↓  ALLOW
-  ├── CONTENT_AUTHZ (SGP)     ← "is this prompt allowed by governance policy?"
-  ↓  ALLOW
-  ├── CONTENT_AUTHZ (MA)      ← "is this content safe?"
-  ↓  ALLOW
+Ingress Gateway (CLIENT_TO_AGENT — inbound requests):
+  ├── REQUEST_AUTHZ → IAP    ← "is this caller a valid service identity?"
+  └── CONTENT_AUTHZ → MA     ← "is this prompt safe?" (DLP, RAI, jailbreak)
+        ↓ ALLOW
 Reasoning Engine
+        ↓ agent makes outbound tool call
+Egress Gateway (AGENT_TO_ANYWHERE — outbound calls):
+  ├── REQUEST_AUTHZ → IAP    ← "is this agent an authorized service identity?"
+  ├── CONTENT_AUTHZ → MA     ← "is this AI call content safe?"
+  └── CONTENT_AUTHZ → SGP    ← "is this outbound call within governance policy?"
+        ↓ ALLOW
+External API / Vertex AI
 ```
+
+> [!IMPORTANT]
+> **API hard limit:** The Agent Gateway enforces at most **1 `CONTENT_AUTHZ`
+> policy per `CLIENT_TO_AGENT` (ingress) gateway**. The SGP extension cannot
+> be added to the ingress gateway — MA occupies the single slot.
+> SGP governance applies to **egress only** (outbound tool calls).
+> This is a platform constraint — see `KNOWN_ISSUES.md #011`.
 
 > [!IMPORTANT]
 > IAP requires agents to be registered with the Agent Registry bound to the
