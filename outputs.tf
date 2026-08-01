@@ -106,6 +106,17 @@ output "egress_iap_policy_id" {
   description = "The ID of the IAP REQUEST_AUTHZ policy on the egress gateway (validates agent service identity)."
 }
 
+# --- Agent Registry ---
+output "registered_egress_endpoints" {
+  value       = { for host, sid in local.egress_host_ids : host => sid }
+  description = "Map of hostname → Agent Registry service_id for all hosts registered from allowed_egress_hosts."
+}
+
+output "re_agent_registry_viewer" {
+  value       = google_project_iam_member.re_agent_registry_viewer.member
+  description = "The RE service agent identity granted roles/agentregistry.viewer (can discover all registered endpoints)."
+}
+
 # --- Project ---
 output "project_number" {
   value       = data.google_project.project.number

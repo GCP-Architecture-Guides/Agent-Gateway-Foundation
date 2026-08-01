@@ -48,7 +48,7 @@ variable "cloud_run_service_name" {
 variable "security_google_chat_space" {
   description = "Google Chat space for Model Armor security alerts (separate from token alerts). Format: spaces/AAAA..."
   type        = string
-  default     = ""  # set in terraform.tfvars — install Cloud Monitoring app in the space first
+  default     = "" # set in terraform.tfvars — install Cloud Monitoring app in the space first
 }
 
 variable "security_google_chat_display_name" {
@@ -116,7 +116,7 @@ variable "slack_display_name" {
 variable "google_chat_space" {
   description = "Google Chat space ID (spaces/AAAA...). Install the Cloud Monitoring app in the space first."
   type        = string
-  default     = ""  # set in terraform.tfvars
+  default     = "" # set in terraform.tfvars
 }
 
 variable "google_chat_display_name" {
@@ -365,7 +365,15 @@ variable "agent_team" {
 
 variable "allowed_egress_hosts" {
   type        = list(string)
-  description = "List of external API hosts (like DEV or PRD endpoints) the agent is allowed to access via the Gateway."
+  description = <<-EOT
+    Hosts the agent is allowed to reach via the egress gateway. Each entry drives TWO layers:
+      Layer 1 (network)  — PSC routing: hosts not listed here have no PSC route and are
+                           dropped by the egress gateway's deny-by-default posture.
+      Layer 2 (registry) — Agent Registry: each host is registered as a discoverable
+                           service endpoint (07_agent_registry.tf) so agents can
+                           dynamically discover reachable APIs without hardcoding URLs.
+    Format: hostname only — no https://, no path, no port (e.g. "api.github.com").
+  EOT
   default = [
     "cloudasset.googleapis.com",
     "logging.googleapis.com",
