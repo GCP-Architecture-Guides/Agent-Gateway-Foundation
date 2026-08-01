@@ -87,13 +87,23 @@ output "ingress_iap_policy_id" {
 }
 
 # --- Authz Policy Summary ---
-# Ingress gateway (CLIENT_TO_AGENT): 1x REQUEST_AUTHZ (IAP) + 1x CONTENT_AUTHZ (MA)
-# Egress  gateway (AGENT_TO_ANYWHERE): 1x CONTENT_AUTHZ (MA) + 1x CONTENT_AUTHZ (SGP)
-# Note: API hard limit — at most 1 CONTENT_AUTHZ per CLIENT_TO_AGENT gateway.
-# SGP ingress policy is not possible; see 03_security_and_gateways.tf for detail.
+# Ingress gateway (CLIENT_TO_AGENT):
+#   ├── REQUEST_AUTHZ → IAP (validates caller service identity)
+#   └── CONTENT_AUTHZ → Model Armor (prompt/content screening)
+# Egress gateway (AGENT_TO_ANYWHERE):
+#   ├── REQUEST_AUTHZ → IAP (validates agent service identity on outbound)
+#   ├── CONTENT_AUTHZ → Model Armor (AI call screening)
+#   └── CONTENT_AUTHZ → SGP (semantic governance policy)
+# Note: CLIENT_TO_AGENT hard limit — at most 1 CONTENT_AUTHZ per ingress gateway.
+# SGP ingress policy is not possible; see 03_security_and_gateways.tf.
 output "egress_sgp_policy_id" {
   value       = google_network_security_authz_policy.egress_sgp_policy.id
   description = "The ID of the SGP CONTENT_AUTHZ policy on the egress gateway."
+}
+
+output "egress_iap_policy_id" {
+  value       = google_network_security_authz_policy.egress_iap_policy.id
+  description = "The ID of the IAP REQUEST_AUTHZ policy on the egress gateway (validates agent service identity)."
 }
 
 # --- Project ---

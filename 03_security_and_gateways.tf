@@ -286,6 +286,34 @@ resource "google_network_security_authz_policy" "egress_sgp_policy" {
   # blocked by the gateway's deny-by-default posture at the routing layer.
 }
 
+# IAP REQUEST_AUTHZ on EGRESS — validates the agent's service identity before
+# allowing outbound calls. Ensures only authorized REs (those whose SA holds
+# roles/iap.httpsResourceAccessor) can make egress calls through this gateway.
+# Reuses the same iap_extension resource as the ingress policy.
+# This mirrors the ingress IAP check — identity validated on the way IN and OUT.
+resource "google_network_security_authz_policy" "egress_iap_policy" {
+  provider = google-beta
+
+  name           = "${var.prefix}-iap-egress-policy"
+  location       = var.location
+  project        = var.project_id
+
+  action         = "CUSTOM"
+  policy_profile = "REQUEST_AUTHZ"
+
+  target {
+    resources = [google_network_services_agent_gateway.egress_gateway.id]
+  }
+
+  custom_provider {
+    authz_extension {
+      resources = [google_network_services_authz_extension.iap_extension.id]
+    }
+  }
+
+  depends_on = [google_network_services_authz_extension.iap_extension]
+}
+
 # ==============================================================================
 # INGRESS ENFORCEMENT — RESTRICT DIRECT REASONING ENGINE ACCESS
 # ==============================================================================
