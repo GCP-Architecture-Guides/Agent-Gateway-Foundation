@@ -76,7 +76,7 @@ resource "null_resource" "register_egress_endpoint" {
         --display-name="${each.key}" \
         --description="Egress endpoint managed by Terraform. PSC-routed via ${var.prefix}-egress-gateway. Source: allowed_egress_hosts." \
         --endpoint-spec-type=no-spec \
-        --interfaces="url=https://${each.key},protocolBinding=HTTP+JSON,protocolVersion=v1" \
+        --interfaces="url=https://${each.key},protocolBinding=http-json" \
         --quiet 2>&1 || echo "  (already exists or non-fatal error — continuing)"
     EOT
   }
