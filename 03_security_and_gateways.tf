@@ -435,44 +435,28 @@ resource "google_project_iam_member" "iap_accessor" {
 # ==============================================================================
 # GATEWAY SERVICE ACCOUNT — MODEL ARMOR ACCESS
 # ==============================================================================
-# The Agent Gateway uses a Google-managed service account
-# (service-PROJECT_NUMBER@gcp-sa-dep.iam.gserviceaccount.com) to call authz
-# extensions. This SA must have roles/modelarmor.inspector so it can invoke
-# the Model Armor screening API on behalf of the gateway.
-# Without this grant, the MA extension call returns 403 and all gateway
-# requests fail with PERMISSION_DENIED at the authz extension stage.
-resource "google_project_iam_member" "gateway_sa_modelarmor_inspector" {
-  project = var.project_id
-  role    = "roles/modelarmor.inspector"
-  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-dep.iam.gserviceaccount.com"
-
-  depends_on = [google_project_service.modelarmor]
-}
+# No explicit IAM grant required for the gcp-sa-dep gateway SA to call Model Armor.
+# The gcp-sa-dep SA (service-PROJECT_NUMBER@gcp-sa-dep.iam.gserviceaccount.com)
+# is a Google-managed service account. It has implicit authorization to invoke
+# the Model Armor extension endpoint through the Agent Gateway extension framework.
+# Attempting to bind roles/modelarmor.inspector at project scope returns:
+#   "Role roles/modelarmor.inspector is not supported for this resource."
+# That role does not exist. No action needed — the extension works out of the box.
 
 # ==============================================================================
-# SGP INGRESS POLICY
+# SGP INGRESS POLICY — API CONSTRAINT: NOT POSSIBLE
 # ==============================================================================
-# Mirrors the egress SGP policy but applies to the INGRESS gateway.
-# Screens inbound prompts through the SGP engine before they reach any agent.
-# Together with egress SGP, this closes the full loop:
-#   ingress SGP: inbound prompt screening (what is being asked)
-#   egress SGP:  outbound response screening (what goes back to the caller)
-# Note: CONTENT_AUTHZ + sgp.internal.gemini-corp does NOT support http_rules.
-resource "google_network_security_authz_policy" "ingress_sgp_policy" {
-  provider       = google-beta
-  name           = "${var.prefix}-sgp-ingress-policy"
-  location       = var.location
-  project        = var.project_id
-  action         = "CUSTOM"
-  policy_profile = "CONTENT_AUTHZ"
-
-  target {
-    resources = [google_network_services_agent_gateway.ingress_gateway.id]
-  }
-
-  custom_provider {
-    authz_extension {
-      resources = [google_network_services_authz_extension.sgp_extension.id]
-    }
-  }
-}
+# The Agent Gateway API enforces a HARD LIMIT: at most one CONTENT_AUTHZ
+# AuthzPolicy per gateway with CLIENT_TO_AGENT (ingress) access path.
+# The ingress gateway's CONTENT_AUTHZ slot is already occupied by ran-ma-policy
+# (Model Armor). A second CONTENT_AUTHZ policy (SGP) cannot be added.
+#
+# API error returned if attempted:
+#   "at most one CONTENT_AUTHZ AuthzPolicy is allowed for AgentGateway
+#    with CLIENT_TO_AGENT access path: invalid argument"
+#
+# Result: SGP inbound screening is NOT possible on the ingress gateway.
+# SGP governance applies to egress only (ran-sgp-egress-policy).
+# Inbound content screening relies on Model Armor (ran-ma-policy on ingress).
+# This is a platform limitation — tracked for resolution when the API allows
+# multiple CONTENT_AUTHZ policies per gateway direction.

@@ -70,9 +70,31 @@ output "model_armor_template_id" {
   description = "The ID of the Model Armor high security template (for user prompt screening)."
 }
 
-# NOTE: model_armor_template_responses_id will be added here once
-# google_model_armor_template.security_responses is provisioned (see KNOWN_ISSUES.md #001).
+# NOTE: model_armor_template_responses_id intentionally absent.
+# Response template screening causes false-positive 403 on :streamQuery responses
+# (gRPC-HTTP transcoding format triggers PI/Jailbreak filter). Model output safety
+# is handled by Gemini built-in harm filters. See KNOWN_ISSUES.md #001.
 
+# --- IAP Service Extension ---
+output "iap_extension_id" {
+  value       = google_network_services_authz_extension.iap_extension.id
+  description = "The ID of the IAP authz extension (REQUEST_AUTHZ service identity validation)."
+}
+
+output "ingress_iap_policy_id" {
+  value       = google_network_security_authz_policy.ingress_iap_policy.id
+  description = "The ID of the IAP REQUEST_AUTHZ policy on the ingress gateway."
+}
+
+# --- Authz Policy Summary ---
+# Ingress gateway (CLIENT_TO_AGENT): 1x REQUEST_AUTHZ (IAP) + 1x CONTENT_AUTHZ (MA)
+# Egress  gateway (AGENT_TO_ANYWHERE): 1x CONTENT_AUTHZ (MA) + 1x CONTENT_AUTHZ (SGP)
+# Note: API hard limit — at most 1 CONTENT_AUTHZ per CLIENT_TO_AGENT gateway.
+# SGP ingress policy is not possible; see 03_security_and_gateways.tf for detail.
+output "egress_sgp_policy_id" {
+  value       = google_network_security_authz_policy.egress_sgp_policy.id
+  description = "The ID of the SGP CONTENT_AUTHZ policy on the egress gateway."
+}
 
 # --- Project ---
 output "project_number" {
@@ -90,4 +112,3 @@ output "gateway_observability_dashboard_id" {
   value       = module.gateway_observability.dashboard_id
   description = "The ID of the Gateway Observability dashboard."
 }
-

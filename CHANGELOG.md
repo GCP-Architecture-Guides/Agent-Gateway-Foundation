@@ -26,14 +26,20 @@ Consuming teams should pin to a tag: `?ref=v1.0.0`
   `roles/iap.httpsResourceAccessor` grant to
   `service-PROJECT_NUMBER@gcp-sa-aiplatform-re.iam.gserviceaccount.com` so
   Reasoning Engines can call through the gateway without manual IAM setup.
-- **Gateway SA Model Armor access** — Added `roles/modelarmor.inspector`
-  grant to the gateway's `gcp-sa-dep` service account. Without this, the
-  gateway cannot invoke the MA extension and all requests fail with 403.
-- **SGP ingress policy** (NEW) — Added `ran-sgp-ingress-policy` targeting
-  the ingress gateway, mirroring the existing egress SGP policy. Inbound
-  prompts are now screened by SGP before reaching any agent.
 - **Removed `iap_enabled` variable** — No longer needed. `iap_allowed_members`
   now controls only additional callers beyond the auto-granted RE service agent.
+- **Outputs** (`outputs.tf`) — Added `iap_extension_id`, `ingress_iap_policy_id`,
+  `egress_sgp_policy_id` outputs for consuming modules. Updated MA responses note.
+
+### Documented Platform Constraints (Not Fixable in Terraform)
+- **Gateway SA Model Armor IAM** — `roles/modelarmor.inspector` does not exist
+  at project scope (API returns 400 badRequest). The `gcp-sa-dep` gateway SA has
+  implicit access to Model Armor via the Agent Gateway extension framework. No
+  explicit IAM grant is needed or possible.
+- **SGP ingress policy** — The Agent Gateway API enforces a hard limit of
+  **at most 1 CONTENT_AUTHZ policy per CLIENT_TO_AGENT (ingress) gateway**. The
+  ingress slot is occupied by Model Armor. SGP can only be applied to egress.
+  Inbound governance relies on MA prompt screening.
 
 ### Breaking Changes
 - `iap_enabled` variable removed. Remove it from `terraform.tfvars` if set.
@@ -43,9 +49,9 @@ Consuming teams should pin to a tag: `?ref=v1.0.0`
 ```bash
 # If iap_enabled = true was in terraform.tfvars:
 #   1. Remove the iap_enabled line
-#   2. terraform apply  (creates iap_extension + grants as new resources)
+#   2. terraform apply  (creates iap_extension + RE IAP grant as new resources)
 # If iap_enabled = false (default):
-#   1. terraform apply  (creates 4 new resources — no state conflict)
+#   1. terraform apply  (creates 3 new resources — no state conflict)
 ```
 
 ---
