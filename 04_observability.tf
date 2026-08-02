@@ -111,8 +111,7 @@ module "agent_observability" {
 resource "google_bigquery_dataset" "llm_audit_logs" {
   dataset_id                 = "llm_audit_logs"
   project                    = var.project_id
-  location                   = var.location
-  description                = "AI agent audit logs — all aiplatform.googleapis.com DATA_READ and DATA_WRITE events."
+  location                   = "US"   # existing dataset created with US (multi-region); do not change
   delete_contents_on_destroy = false
 
   depends_on = [google_project_service.storage]
