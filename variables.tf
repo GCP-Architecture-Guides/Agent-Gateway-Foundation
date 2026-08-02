@@ -37,7 +37,32 @@ variable "organization_id" {
   type        = string
 }
 
-
+# ==============================================================================
+# AUDIT LOGGING
+# ==============================================================================
+variable "audit_log_services" {
+  type        = list(string)
+  description = <<-EOT
+    GCP services to enable DATA_READ + DATA_WRITE audit logs for.
+    Each entry creates a google_project_iam_audit_config resource.
+    Add any service your team needs audited in terraform.tfvars —
+    no Terraform code changes required.
+    Common values:
+      "aiplatform.googleapis.com"     ← Vertex AI / Reasoning Engine (always include)
+      "agentregistry.googleapis.com"  ← Agent Registry reads/writes
+      "networksecurity.googleapis.com"← Authz policy changes
+      "secretmanager.googleapis.com" ← Secret access
+      "storage.googleapis.com"        ← GCS object reads/writes
+      "allServices"                   ← Catch-all (verbose, use with care)
+  EOT
+  default = [
+    "aiplatform.googleapis.com",
+    "agentregistry.googleapis.com",
+    "networksecurity.googleapis.com",
+    "networkservices.googleapis.com",
+    "secretmanager.googleapis.com",
+  ]
+}
 
 variable "cloud_run_service_name" {
   description = "Glass UI Cloud Run service name for Model Armor log-based metrics."

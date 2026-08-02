@@ -19,16 +19,16 @@
 # 3. SECURITY & GOVERNANCE POLICIES
 # ------------------------------------------------------------------------------
 # --- Data Access Audit Logs (Capture Prompts/Responses) ---
-resource "google_project_iam_audit_config" "vertex_ai_audit_logs" {
-  project = var.project_id
-  service = "aiplatform.googleapis.com"
+# Audit logging — one resource per service in var.audit_log_services
+# DATA_ADMIN is intentionally excluded (too noisy for PoC).
+# Add services in terraform.tfvars: audit_log_services = ["aiplatform.googleapis.com", "..."]
+resource "google_project_iam_audit_config" "data_access_logs" {
+  for_each = toset(var.audit_log_services)
+  project  = var.project_id
+  service  = each.key
 
-  audit_log_config {
-    log_type = "DATA_READ"
-  }
-  audit_log_config {
-    log_type = "DATA_WRITE"
-  }
+  audit_log_config { log_type = "DATA_READ" }
+  audit_log_config { log_type = "DATA_WRITE" }
 }
 
 # --- DLP Inspect Template ---
@@ -211,7 +211,7 @@ resource "google_network_security_authz_policy" "egress_ma_policy" {
       # must be declared as separate hosts{} entries within the same block.
       operations {
         hosts { suffix = ".aiplatform.googleapis.com" }
-        hosts { exact  = "aiplatform.googleapis.com" }
+        hosts { exact = "aiplatform.googleapis.com" }
         paths {
           contains    = "generatecontent"
           ignore_case = true
@@ -294,9 +294,9 @@ resource "google_network_security_authz_policy" "egress_sgp_policy" {
 resource "google_network_security_authz_policy" "egress_iap_policy" {
   provider = google-beta
 
-  name           = "${var.prefix}-iap-egress-policy"
-  location       = var.location
-  project        = var.project_id
+  name     = "${var.prefix}-iap-egress-policy"
+  location = var.location
+  project  = var.project_id
 
   action         = "CUSTOM"
   policy_profile = "REQUEST_AUTHZ"
@@ -395,8 +395,8 @@ resource "google_network_services_authz_extension" "iap_extension" {
   project  = var.project_id
 
   # Global IAP service endpoint (not a regional REP endpoint like Model Armor)
-  service  = "iap.googleapis.com"
-  timeout  = "1s"
+  service = "iap.googleapis.com"
+  timeout = "1s"
 
   metadata = {
     iapPolicyVersion = "V1" # Required — extension rejects requests without this
@@ -411,9 +411,9 @@ resource "google_network_services_authz_extension" "iap_extension" {
 resource "google_network_security_authz_policy" "ingress_iap_policy" {
   provider = google-beta
 
-  name           = "${var.prefix}-iap-ingress-policy"
-  location       = var.location
-  project        = var.project_id
+  name     = "${var.prefix}-iap-ingress-policy"
+  location = var.location
+  project  = var.project_id
 
   action         = "CUSTOM"
   policy_profile = "REQUEST_AUTHZ"

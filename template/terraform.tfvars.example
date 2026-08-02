@@ -73,3 +73,16 @@ org_monitored_project_ids = [
 #   "group:ai-team@example.com",
 # ]
 
+# ── Audit Logging (DATA_READ + DATA_WRITE) ──────────────────────────────────
+# Controls which GCP services get data access audit logs enabled.
+# aiplatform and agentregistry are included by default.
+# Add any service your workload touches — no code changes needed.
+# audit_log_services = [
+#   "aiplatform.googleapis.com",        # Vertex AI / RE — always include
+#   "agentregistry.googleapis.com",     # Agent Registry reads/writes
+#   "networksecurity.googleapis.com",   # Authz policy changes
+#   "networkservices.googleapis.com",   # Gateway config changes
+#   "secretmanager.googleapis.com",     # Secret access
+#   # "storage.googleapis.com",         # GCS reads/writes (add if agent uses GCS)
+#   # "allServices",                    # Catch-all — very verbose
+# ]
