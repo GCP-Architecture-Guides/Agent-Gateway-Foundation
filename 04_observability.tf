@@ -92,3 +92,52 @@ module "agent_observability" {
   per_agent_spike_duration_seconds            = var.per_agent_spike_duration_seconds
 }
 
+# ------------------------------------------------------------------------------
+# AUDIT LOG SINK → BigQuery
+# ------------------------------------------------------------------------------
+# Captures ALL aiplatform.googleapis.com data access audit logs into BigQuery
+# for long-term retention, querying, and dashboard use.
+#
+# Filter captures the full breadth of agent activity:
+#   - StreamQueryReasoningEngine  (inference calls through the gateway)
+#   - SessionService.*            (session create/list/get/delete)
+#   - ReasoningEngineExecutionService.* (direct RE execution)
+#   - SemanticGovernancePolicyEngineService.* (SGP decisions)
+#   - Any other aiplatform DATA_READ / DATA_WRITE events
+#
+# WHY broad filter: the original sink only matched Predict/GenerateContent/
+# StreamGenerateContent and missed all RE, session, and SGP audit events.
+# ------------------------------------------------------------------------------
+resource "google_bigquery_dataset" "llm_audit_logs" {
+  dataset_id                 = "llm_audit_logs"
+  project                    = var.project_id
+  location                   = var.location
+  description                = "AI agent audit logs — all aiplatform.googleapis.com DATA_READ and DATA_WRITE events."
+  delete_contents_on_destroy = false
+
+  depends_on = [google_project_service.storage]
+}
+
+resource "google_logging_project_sink" "llm_invocation_sink" {
+  name        = "llm-invocation-sink"
+  project     = var.project_id
+  destination = "bigquery.googleapis.com/projects/${var.project_id}/datasets/${google_bigquery_dataset.llm_audit_logs.dataset_id}"
+
+  # Captures ALL aiplatform data access events — RE queries, sessions, SGP decisions, etc.
+  filter = <<-EOT
+    logName="projects/${var.project_id}/logs/cloudaudit.googleapis.com%2Fdata_access"
+    AND protoPayload.serviceName="aiplatform.googleapis.com"
+  EOT
+
+  unique_writer_identity = true
+
+  depends_on = [google_bigquery_dataset.llm_audit_logs]
+}
+
+# Grant the sink's writer SA permission to write to the BigQuery dataset
+resource "google_bigquery_dataset_iam_member" "llm_sink_writer" {
+  dataset_id = google_bigquery_dataset.llm_audit_logs.dataset_id
+  project    = var.project_id
+  role       = "roles/bigquery.dataEditor"
+  member     = google_logging_project_sink.llm_invocation_sink.writer_identity
+}
