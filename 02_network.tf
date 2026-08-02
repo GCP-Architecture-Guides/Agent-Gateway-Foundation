@@ -50,6 +50,38 @@ resource "google_compute_network_attachment" "psc_network_attachment" {
   subnetworks           = [google_compute_subnetwork.intf_subnet.id]
 }
 
+# ==============================================================================
+# GAP 5 (from official docs): PSC Ingress Firewall Rule
+# ==============================================================================
+# Official docs (set-up-vpc-connectivity) require a firewall rule allowing
+# ingress from the PSC network attachment subnet into internal services / MCP
+# servers hosted in the VPC. Without this, PSC traffic from the gateway is
+# blocked by the implicit deny-all ingress rule.
+#
+# Disabled by default (enable_psc_firewall_rule = false) so existing deployments
+# are not affected. Enable in terraform.tfvars when teams host internal
+# services (MCP servers, private APIs) inside the VPC that agents call outbound.
+# ==============================================================================
+resource "google_compute_firewall" "psc_ingress_allow" {
+  count   = var.enable_psc_firewall_rule ? 1 : 0
+  name    = "${var.prefix}-psc-ingress-allow"
+  network = google_compute_network.vpc.name
+  project = var.project_id
+
+  description = "Allow PSC ingress from gateway network attachment subnet to internal services/MCP servers."
+  direction   = "INGRESS"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443", "80"]
+  }
+
+  # Source: the PSC interface subnet where the gateway attaches
+  source_ranges = [google_compute_subnetwork.intf_subnet.ip_cidr_range]
+
+  depends_on = [google_project_service.compute]
+}
+
 # Agent Gateway - Ingress
 resource "google_network_services_agent_gateway" "ingress_gateway" {
   provider = google-beta

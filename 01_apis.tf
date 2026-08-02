@@ -138,6 +138,14 @@ resource "google_project_service" "apphub" {
   disable_on_destroy = false
 }
 
+# Discovery Engine — enables Discovery Engine-backed agent runtimes.
+# Required IAM grants for the gcp-sa-discoveryengine SA are in 03_security_and_gateways.tf.
+resource "google_project_service" "discoveryengine" {
+  service            = "discoveryengine.googleapis.com"
+  disable_on_destroy = false
+  depends_on         = [google_project_service.cloudresourcemanager]
+}
+
 # NOTE: Custom org policies (enforceReasoningEngineAgentGatewayConfig,
 # enforceAgentIdentityForReasoningEngine, enforceReasoningEngineOtelConfig)
 # are applied via a best-effort gcloud step in cloudbuild.yaml (apply-org-policies).

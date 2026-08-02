@@ -111,7 +111,7 @@ module "agent_observability" {
 resource "google_bigquery_dataset" "llm_audit_logs" {
   dataset_id                 = "llm_audit_logs"
   project                    = var.project_id
-  location                   = "US"   # existing dataset created with US (multi-region); do not change
+  location                   = "US" # existing dataset created with US (multi-region); do not change
   delete_contents_on_destroy = false
 
   depends_on = [google_project_service.storage]
@@ -122,10 +122,25 @@ resource "google_logging_project_sink" "llm_invocation_sink" {
   project     = var.project_id
   destination = "bigquery.googleapis.com/projects/${var.project_id}/datasets/${google_bigquery_dataset.llm_audit_logs.dataset_id}"
 
-  # Captures ALL aiplatform data access events — RE queries, sessions, SGP decisions, etc.
+  # Two log streams captured:
+  #
+  # Stream 1: ALL aiplatform data access events
+  #   RE queries, sessions, SGP decisions, etc.
+  #   logName: cloudaudit.googleapis.com/data_access
+  #
+  # Stream 2: Gateway authz policy evaluation logs (GAP 3 fix)
+  #   Records every ALLOW/DENY decision the gateway makes, including:
+  #   jsonPayload.action, jsonPayload.ruleId, jsonPayload.principal,
+  #   jsonPayload.destinationHost, jsonPayload.latencyMs
+  #   logName: networksecurity.googleapis.com/authz_policy_evaluation
+  #   Without this stream, there is no queryable record of what the gateway blocked.
   filter = <<-EOT
-    logName="projects/${var.project_id}/logs/cloudaudit.googleapis.com%2Fdata_access"
-    AND protoPayload.serviceName="aiplatform.googleapis.com"
+    (
+      logName="projects/${var.project_id}/logs/cloudaudit.googleapis.com%2Fdata_access"
+      AND protoPayload.serviceName="aiplatform.googleapis.com"
+    ) OR (
+      logName="projects/${var.project_id}/logs/networksecurity.googleapis.com%2Fauthz_policy_evaluation"
+    )
   EOT
 
   unique_writer_identity = true

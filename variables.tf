@@ -483,3 +483,26 @@ variable "iap_allowed_members" {
   type        = list(string)
   default     = []
 }
+
+# ==============================================================================
+# GAP 5: PSC Ingress Firewall Rule (optional)
+# ==============================================================================
+variable "enable_psc_firewall_rule" {
+  description = <<-EOT
+    Enable a firewall rule allowing ingress traffic from the PSC network attachment
+    subnet into internal services and MCP servers hosted in the VPC.
+
+    Required (set to true) when:
+      - Teams host private MCP servers inside the VPC that agents call outbound.
+      - Teams host private APIs or internal services in the VPC.
+
+    Leave false (default) for standard deployments where agents only call
+    external public APIs (googleapis.com, github.com, etc.) — those go through
+    the PSC egress gateway directly and don't need a VPC firewall rule.
+
+    See: https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/gateways/set-up-vpc-connectivity
+  EOT
+  type        = bool
+  default     = false
+}
+

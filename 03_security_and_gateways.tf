@@ -134,12 +134,13 @@ resource "google_model_armor_template" "security_high" {
 
 # --- Authz Extensions ---
 resource "google_network_services_authz_extension" "ma_extension" {
-  provider = google-beta
-  name     = "${var.prefix}-ma-extension"
-  location = var.location
-  project  = var.project_id
-  service  = "modelarmor.${var.location}.rep.googleapis.com"
-  timeout  = "3s"
+  provider  = google-beta
+  name      = "${var.prefix}-ma-extension"
+  location  = var.location
+  project   = var.project_id
+  service   = "modelarmor.${var.location}.rep.googleapis.com"
+  timeout   = "3s"
+  fail_open = false # explicit fail-closed per official docs — deny if MA unreachable
 
   metadata = {
     model_armor_settings = jsonencode([
@@ -250,12 +251,13 @@ data "external" "sgp_engine" {
 
 # --- SGP Authz Extension & Policy ---
 resource "google_network_services_authz_extension" "sgp_extension" {
-  provider = google-beta
-  name     = "${var.prefix}-sgp-extension"
-  location = var.location
-  project  = var.project_id
-  service  = "sgp.internal.gemini-corp"
-  timeout  = "3s"
+  provider  = google-beta
+  name      = "${var.prefix}-sgp-extension"
+  location  = var.location
+  project   = var.project_id
+  service   = "sgp.internal.gemini-corp"
+  timeout   = "3s"
+  fail_open = false # explicit fail-closed per official docs — deny if SGP unreachable
 
   depends_on = [google_project_service.networkservices]
 }
@@ -386,13 +388,14 @@ resource "google_network_security_authz_policy" "egress_iap_policy" {
 
 # IAP Authz Extension — always created (service identity validation is always needed)
 # Note: iapPolicyVersion = "V1" is REQUIRED in metadata per the official spec.
-# Fail-closed behavior (deny if IAP unreachable) is the API default.
+# fail_open = false is REQUIRED per official docs — deny if IAP unreachable (fail-closed).
 resource "google_network_services_authz_extension" "iap_extension" {
   provider = google-beta
 
-  name     = "${var.prefix}-iap-extension"
-  location = var.location
-  project  = var.project_id
+  name      = "${var.prefix}-iap-extension"
+  location  = var.location
+  project   = var.project_id
+  fail_open = false # explicit fail-closed per official docs — deny if IAP unreachable
 
   # Global IAP service endpoint (not a regional REP endpoint like Model Armor)
   service = "iap.googleapis.com"
@@ -460,6 +463,33 @@ resource "google_project_iam_member" "iap_accessor" {
   member  = each.value
 
   depends_on = [google_project_service.iap]
+}
+
+# ==============================================================================
+# GAP 1 (from official docs): roles/networkservices.agentGatewayUser
+# ==============================================================================
+# Required for the RE service agent to USE the gateway (route traffic through it).
+# Without this, agents may not be able to reach the gateway even if IAP passes.
+resource "google_project_iam_member" "re_agent_gateway_user" {
+  project = var.project_id
+  role    = "roles/networkservices.agentGatewayUser"
+  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+
+  depends_on = [google_project_service.networkservices, google_project_service.aiplatform]
+}
+
+# ==============================================================================
+# GAP 2 (from official docs): Discovery Engine service agent — IAP accessor
+# ==============================================================================
+# The Discovery Engine service agent needs roles/iap.httpsResourceAccessor so
+# Discovery Engine-backed agents can route through the gateway.
+# SA format: service-PROJECT_NUMBER@gcp-sa-discoveryengine.iam.gserviceaccount.com
+resource "google_project_iam_member" "discovery_engine_iap_accessor" {
+  project = var.project_id
+  role    = "roles/iap.httpsResourceAccessor"
+  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-discoveryengine.iam.gserviceaccount.com"
+
+  depends_on = [google_project_service.iap, google_project_service.discoveryengine]
 }
 
 # ==============================================================================
