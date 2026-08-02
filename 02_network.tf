@@ -60,7 +60,14 @@ resource "google_network_services_agent_gateway" "ingress_gateway" {
   google_managed {
     governed_access_path = "CLIENT_TO_AGENT"
   }
-  depends_on = [google_project_service.networkservices]
+
+  # Wire gateway to Agent Registry so it can reference registered services.
+  # Format: //agentregistry.googleapis.com/projects/{project}/locations/{region}
+  registries = [
+    "//agentregistry.googleapis.com/projects/${var.project_id}/locations/${var.location}"
+  ]
+
+  depends_on = [google_project_service.networkservices, google_project_service.agentregistry]
 }
 
 # Agent Gateway - Egress
@@ -73,7 +80,13 @@ resource "google_network_services_agent_gateway" "egress_gateway" {
   google_managed {
     governed_access_path = "AGENT_TO_ANYWHERE"
   }
-  depends_on = [google_project_service.networkservices]
+
+  # Wire gateway to Agent Registry — gateway enforces routes only to
+  # services registered under this project+location registry.
+  registries = [
+    "//agentregistry.googleapis.com/projects/${var.project_id}/locations/${var.location}"
+  ]
+
   network_config {
     egress {
       network_attachment = google_compute_network_attachment.psc_network_attachment.id
@@ -84,6 +97,8 @@ resource "google_network_services_agent_gateway" "egress_gateway" {
       domains        = ["sgp.internal.gemini-corp."]
     }
   }
+
+  depends_on = [google_project_service.networkservices, google_project_service.agentregistry]
 }
 
 # =========================================================================
