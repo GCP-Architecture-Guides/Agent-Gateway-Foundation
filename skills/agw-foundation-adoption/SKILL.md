@@ -387,7 +387,10 @@ allowed_egress_hosts = [
   "api.new-host.com",        # ADD THIS
 ]
 
-# 2. Apply — PSC route is added automatically
+# 2. Apply — three layers are updated automatically:
+#    Layer 1: PSC routing — network path created
+#    Layer 2: Agent Registry — service registered as discoverable catalog entry
+#    Layer 3: Gateway registries ref — gateway consults registry for resolution
 terraform -chdir=foundation apply -auto-approve
 
 # No agent redeploy. No gateway restart needed.
@@ -398,6 +401,61 @@ terraform -chdir=foundation apply -auto-approve
 > [!NOTE]
 > Only the hostname goes in `allowed_egress_hosts` — not the full URL.
 > For HTTPS APIs: `api.example.com` (no `https://`, no path, no port).
+
+---
+
+## Agent Registry Integration (Three-Layer Egress Architecture)
+
+As of foundation v1.0.4, `allowed_egress_hosts` drives **three enforcing layers**, not one:
+
+```
+tfvars: allowed_egress_hosts = ["api.github.com", ...]
+              │
+              ├── Layer 1: PSC routing (02_network.tf)
+              │     network_attachment → deny-by-default egress route
+              │
+              ├── Layer 2: Agent Registry (07_agent_registry.tf)
+              │     gcloud alpha agent-registry services create "api-github-com"
+              │     → discoverable service catalog entry
+              │
+              └── Layer 3: Gateway ↔ Registry wiring (02_network.tf)
+                    registries = ["//agentregistry.googleapis.com/projects/{proj}/locations/{region}"]
+                    → gateway actively references the registry for service resolution
+```
+
+### The `registries` field
+
+Both ingress and egress `google_network_services_agent_gateway` resources include:
+
+```hcl
+registries = [
+  "//agentregistry.googleapis.com/projects/${var.project_id}/locations/${var.location}"
+]
+```
+
+This closes the architectural gap — without it, the Agent Registry is a catalog
+that the gateway never consults. With it, the gateway uses the registry for
+service resolution, making the three layers a unified enforcement stack.
+
+> [!IMPORTANT]
+> **Known Terraform limitation:** For gateways that were created BEFORE the `registries`
+> field was added to the TF resource, Terraform plans show `No changes` even when the
+> field is missing from the API state. This is a provider schema issue (the field is
+> computed as optional empty list on existing resources).
+>
+> **Fix for existing gateways** — patch directly via REST API:
+> ```bash
+> PROJ=YOUR_PROJECT  REGION=YOUR_REGION  PREFIX=YOUR_PREFIX
+> REGISTRY="//agentregistry.googleapis.com/projects/${PROJ}/locations/${REGION}"
+> for GW in ingress egress; do
+>   curl -s -X PATCH \
+>     "https://networkservices.googleapis.com/v1/projects/${PROJ}/locations/${REGION}/agentGateways/${PREFIX}-${GW}-gateway?updateMask=registries" \
+>     -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+>     -H "Content-Type: application/json" \
+>     -d "{\"registries\": [\"${REGISTRY}\"]}"
+> done
+> ```
+> New deployments (terraform apply from scratch) will pick up the field automatically.
 
 ---
 
