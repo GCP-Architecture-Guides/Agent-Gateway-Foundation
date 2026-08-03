@@ -762,27 +762,50 @@ With DRY_RUN deployed (current state):
 When you want IAP to actually **enforce** which agents can call which endpoints (e.g.,
 agent A can only call endpoint X, not Y), follow these steps:
 
-#### Step 1 — Grant `roles/iap.egressor` to each RE service account
+#### Step 1 — Grant `roles/iap.egressor` to the Agent Identity SA
 
-Each Reasoning Engine has a service account: `service-PROJECT_NUMBER@gcp-sa-aiplatform-re.iam.gserviceaccount.com`
+> [!IMPORTANT]
+> **This is the Agent Identity SA, NOT `gcp-sa-aiplatform-re`.**
+>
+> `gcp-sa-aiplatform-re` is the Vertex AI platform SA (manages RE lifecycle — deploy, scale, GCS).  
+> The Agent Identity SA represents *the agent itself* as a principal on egress calls.  
+> Agent Gateway uses `identityType: AGENT_IDENTITY` (injected by the gateway patch) to create  
+> a dedicated SA per RE: `agent-RE_RESOURCE_ID@PROJECT_ID.iam.gserviceaccount.com`
 
-Grant this SA the `iap.egressor` role **for each Agent Registry endpoint** the agent needs access to:
+Find the Agent Identity SA for each deployed RE:
 
 ```bash
-# Find your RE service account
-PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT_ID --format='value(projectNumber)')
-RE_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+# Get the Agent Identity SA for a specific RE
+gcloud ai reasoning-engines describe RE_ID \
+  --project=YOUR_PROJECT_ID \
+  --location=YOUR_REGION \
+  --format="json(spec.identityType, spec.serviceAccount)"
 
-# Grant iap.egressor for a specific registered endpoint
-# The resource is the Agent Registry entry, not the external host directly
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-  --member="serviceAccount:${RE_SA}" \
-  --role="roles/iap.egressor"
+# Example output:
+# {
+#   "spec": {
+#     "identityType": "AGENT_IDENTITY",
+#     "serviceAccount": "agent-292258986755883008@geap-agw.iam.gserviceaccount.com"
+#   }
+# }
+```
 
-# Or at the registry level (applies to all endpoints in the registry):
+Grant `roles/iap.egressor` to that Agent Identity SA at the registry level:
+
+```bash
+AGENT_IDENTITY_SA="agent-RE_ID@YOUR_PROJECT_ID.iam.gserviceaccount.com"
+
+# At the registry level (covers all registered endpoints in the registry):
 gcloud beta agent-registry registries add-iam-policy-binding REGISTRY_ID \
   --location=LOCATION \
-  --member="serviceAccount:${RE_SA}" \
+  --member="serviceAccount:${AGENT_IDENTITY_SA}" \
+  --role="roles/iap.egressor"
+
+# Or at the individual endpoint level (fine-grained: agent A can reach X but not Y):
+gcloud beta agent-registry endpoints add-iam-policy-binding ENDPOINT_ID \
+  --registry=REGISTRY_ID \
+  --location=LOCATION \
+  --member="serviceAccount:${AGENT_IDENTITY_SA}" \
   --role="roles/iap.egressor"
 ```
 
