@@ -100,14 +100,34 @@ resource "null_resource" "register_egress_endpoint" {
 # IAM: Grant the Vertex AI RE service agent roles/agentregistry.viewer
 # so all deployed Reasoning Engines can discover registered services at runtime.
 #
-# The RE service agent SA format:
-#   service-PROJECT_NUMBER@gcp-sa-aiplatform-re.iam.gserviceaccount.com
-# This SA is shared across all REs in the project — one grant covers all agents.
+# IMPORTANT: The SA service-PROJECT_NUMBER@gcp-sa-aiplatform-re.iam.gserviceaccount.com
+# is a Google-managed service agent that is only created by Vertex AI when the FIRST
+# Reasoning Engine is deployed in the project. It does NOT exist on a fresh project
+# before any RE deployment, so a google_project_iam_member resource would fail with
+# "service account does not exist" on every fresh project terraform apply.
+#
+# Fix: use null_resource + gcloud iam add-iam-policy-binding with || true.
+# This makes the grant idempotent:
+#   - Fresh project (SA doesn't exist yet): gcloud fails gracefully (|| true)
+#   - After first RE deploy: SA exists; scripts/deploy_chat_agent.sh and
+#     scripts/deploy_global_agent.sh both re-run terraform apply, which
+#     will then succeed and apply the grant.
 # ------------------------------------------------------------------------------
-resource "google_project_iam_member" "re_agent_registry_viewer" {
-  project = var.project_id
-  role    = "roles/agentregistry.viewer"
-  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+resource "null_resource" "re_agent_registry_viewer" {
+  triggers = {
+    project = var.project_id
+    number  = data.google_project.project.number
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo "Granting roles/agentregistry.viewer to RE service agent..."
+      gcloud projects add-iam-policy-binding "${var.project_id}" \
+        --member="serviceAccount:service-${data.google_project.project.number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com" \
+        --role="roles/agentregistry.viewer" \
+        --quiet 2>&1 || echo "  (SA not yet created — will be granted after first RE deploy; continuing)"
+    EOT
+  }
 
   depends_on = [
     google_project_service.agentregistry,

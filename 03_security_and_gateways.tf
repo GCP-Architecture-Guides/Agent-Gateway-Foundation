@@ -439,62 +439,14 @@ resource "google_network_security_authz_policy" "ingress_iap_policy" {
 }
 
 # ==============================================================================
-# IAP IAM GRANTS
+# NOTE: IAP IAM grants removed (b1667ea).
+# IAP REQUEST_AUTHZ was removed from the egress gateway after confirming it
+# blocked all outbound RE traffic (RE containers don't carry IAP tokens).
+# See: skills/agw-egress-iap-pitfall/SKILL.md for full root cause.
+#
+# NOTE: roles/networkservices.agentGatewayUser removed — role does not exist
+# in GCP IAM (confirmed: gcloud iam roles describe returns NOT FOUND).
 # ==============================================================================
-# Auto-grant 1: Vertex AI RE service agent
-# Every Reasoning Engine runs as this SA — allows RE→gateway calls without
-# any manual configuration. Format: service-PROJECT_NUMBER@gcp-sa-aiplatform-re
-# Note: The SA is created when the aiplatform API is enabled, before the first
-# RE is deployed. Granting IAM here is safe and idempotent.
-resource "google_project_iam_member" "re_service_agent_iap_accessor" {
-  project = var.project_id
-  role    = "roles/iap.httpsResourceAccessor"
-  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
-
-  # depends on both: IAP API must be enabled AND aiplatform API must be enabled
-  # (the gcp-sa-aiplatform-re SA is created when aiplatform.googleapis.com is enabled)
-  depends_on = [google_project_service.iap, google_project_service.aiplatform]
-}
-
-# Optional: additional callers configured in iap_allowed_members (terraform.tfvars).
-# Use this for: extra service accounts, Cloud Run SA, specific teams, etc.
-# The Vertex AI RE service agent above is auto-granted and does NOT need repeating here.
-resource "google_project_iam_member" "iap_accessor" {
-  for_each = toset(var.iap_allowed_members)
-
-  project = var.project_id
-  role    = "roles/iap.httpsResourceAccessor"
-  member  = each.value
-
-  depends_on = [google_project_service.iap]
-}
-
-# ==============================================================================
-# GAP 1 (from official docs): roles/networkservices.agentGatewayUser
-# ==============================================================================
-# Required for the RE service agent to USE the gateway (route traffic through it).
-# Without this, agents may not be able to reach the gateway even if IAP passes.
-resource "google_project_iam_member" "re_agent_gateway_user" {
-  project = var.project_id
-  role    = "roles/networkservices.agentGatewayUser"
-  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
-
-  depends_on = [google_project_service.networkservices, google_project_service.aiplatform]
-}
-
-# ==============================================================================
-# GAP 2 (from official docs): Discovery Engine service agent — IAP accessor
-# ==============================================================================
-# The Discovery Engine service agent needs roles/iap.httpsResourceAccessor so
-# Discovery Engine-backed agents can route through the gateway.
-# SA format: service-PROJECT_NUMBER@gcp-sa-discoveryengine.iam.gserviceaccount.com
-resource "google_project_iam_member" "discovery_engine_iap_accessor" {
-  project = var.project_id
-  role    = "roles/iap.httpsResourceAccessor"
-  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-discoveryengine.iam.gserviceaccount.com"
-
-  depends_on = [google_project_service.iap, google_project_service.discoveryengine]
-}
 
 # ==============================================================================
 # GATEWAY SERVICE ACCOUNT — MODEL ARMOR ACCESS
