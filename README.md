@@ -161,6 +161,35 @@ root_agent = GatewayAgent(
 )
 ```
 
+#### Example Agents (built-in)
+
+Two reference agents ship with the foundation — one per deployment pattern:
+
+| Agent | Model | Endpoint | Deploy Script | When to use |
+|---|---|---|---|---|
+| `agents/chat-agent/` | `gemini-2.5-flash` | `us-east1-aiplatform.googleapis.com` | `deploy_chat_agent.sh` | Standard workloads, data-residency requirements |
+| `agents/global-agent/` | `gemini-3.5-flash` | `aiplatform.googleapis.com` (global) | `deploy_global_agent.sh` | Gemini 3.x models, latest capabilities |
+
+**Regional pattern** (`chat-agent`) — `GOOGLE_CLOUD_LOCATION=us-east1`:
+```bash
+bash scripts/deploy_chat_agent.sh
+# Uses: us-east1-aiplatform.googleapis.com
+# Model: gemini-2.5-flash (available at regional endpoint)
+```
+
+**Global pattern** (`global-agent`) — `GOOGLE_CLOUD_LOCATION=global`:
+```bash
+bash scripts/deploy_global_agent.sh
+# Uses: aiplatform.googleapis.com (global Vertex AI frontend)
+# Model: gemini-3.5-flash (Gemini 3.x, global endpoint only)
+# GCP_REGION is set separately for session/RE control-plane calls
+```
+
+> **Note:** The model endpoint is set entirely by the `GOOGLE_CLOUD_LOCATION`
+> env var injected at deploy time — no code changes needed to switch patterns.
+> See `lib/gateway_agent/global_gemini.py` for the full explanation.
+
+
 ### 3. Deploy
 
 ```bash
@@ -470,7 +499,8 @@ echo "✅ $(ls skills/ 2>/dev/null || ls foundation/skills/) skills linked"
 | `sgp-policy-rules` | "Add/change what my agent is allowed to discuss" |
 | `agent-gateway-deploy-patch` | "RE deploy fails with code 13 / org policy error" |
 | `vertex-ai-global-endpoint-adk` | "My agent returns 404 for the model" |
-| `a2a-agent-runtime` | "Deploy multi-agent A2A" / "RemoteA2aAgent / A2aAgent errors" / "a2a-sdk gotchas" |
+| `a2a-agent-deploy` | \"Deploy A2A specialist agents\" / \"A2A deploy fails\" / \"cloudpickle / pickle errors\" / \"No module named executor\" / \"a2a-sdk 1.1.2 errors\" |
+| `a2a-agent-runtime` | ⚠️ **DEPRECATED** — use `a2a-agent-deploy` instead |
 
 ---
 

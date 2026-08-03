@@ -17,32 +17,35 @@
 
 """GlobalGemini: Thin wrapper over Gemini for Agent Gateway deployments.
 
-In ADK 1.31.1, the base Gemini class derives its endpoint from the
-GOOGLE_CLOUD_LOCATION environment variable. When the RE is deployed in
-us-east1, the default endpoint is us-east1-aiplatform.googleapis.com,
-which is correctly routed through the Agent Gateway egress PSC.
+TWO DEPLOYMENT MODES — controlled by container env vars, not code:
 
-History:
-  - Originally overrode _get_client_args() to force location="global".
-    This was dead code in ADK 1.31.1 (method is not called by the base class).
-  - Then overrode api_client property to return Client(location="global").
-    This broke egress PSC routing because the global endpoint
-    (aiplatform.googleapis.com) is not reachable via the regional PSC attachment.
-  - Confirmed that gemini-2.5-flash IS available at us-east1 regional endpoint.
-    The original concern (model-not-found at regional) no longer applies.
+  Regional (gemini-2.5-flash):
+    Deploy with: scripts/deploy_chat_agent.sh
+    Container env: GOOGLE_CLOUD_LOCATION=us-east1
+    ADK Gemini constructs: https://us-east1-aiplatform.googleapis.com/...
+    Agent Gateway SWP routes to regional Vertex AI frontend.
+    Model availability: gemini-2.5-flash, gemini-2.5-pro (confirmed)
 
-Current approach: use the default Gemini api_client (regional endpoint).
-The Model Armor false-positive is fixed separately by removing
-response_template_id from the authz extension (see 03_security_and_gateways.tf).
+  Global (gemini-3.5-flash, gemini-3.1-flash-lite, etc.):
+    Deploy with: scripts/deploy_global_agent.sh
+    Container env: GOOGLE_CLOUD_LOCATION=global
+    ADK Gemini constructs: https://aiplatform.googleapis.com/...
+    Agent Gateway SWP routes to global Vertex AI frontend.
+    Model availability: all Gemini 3.x models
+    Requires separately: GCP_REGION=<real-region> for session management,
+    RE control-plane, and OTEL calls that do not accept "global" as location.
 
-If Gemini 3.x models are introduced that require the global endpoint AND
-the AGW egress PSC is updated to support it, restore the api_client override:
+WHY GlobalGemini IS A NO-OP:
+  The endpoint is derived entirely from GOOGLE_CLOUD_LOCATION at runtime.
+  No api_client override needed — the base Gemini class handles it correctly.
+  This matches the pattern used in Google's official reference demo:
+  cloud-networking-solutions/demos/agent-gateway (gemini-3.1-flash-lite, global)
 
-    @property
-    def api_client(self):
-        from google.genai import Client
-        project = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT")
-        return Client(vertexai=True, project=project, location="global")
+HISTORY:
+  - Tried overriding _get_client_args() → dead code in ADK 1.31.1.
+  - Tried overriding api_client property → broke PSC routing (empty 500).
+  - Confirmed: env var pattern is the canonical, working approach.
+  - See: skills/vertex-ai-global-endpoint-adk/SKILL.md for full context.
 """
 
 from google.adk.models.google_llm import Gemini

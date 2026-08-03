@@ -1,0 +1,24 @@
+# ===========================================================================
+# RE Container Requirements — global-agent (gemini-3.5-flash, global endpoint)
+# ===========================================================================
+# Same pinning rules as chat-agent. See chat-agent/requirements.txt for the
+# full explanation of why these exact versions are required.
+#
+# The only behavioural difference from chat-agent is the deploy script:
+#   deploy_global_agent.sh sets GOOGLE_CLOUD_LOCATION=global
+#   → ADK Gemini routes inference to aiplatform.googleapis.com (global)
+#   → gemini-3.5-flash is served by the global Vertex AI frontend
+#
+# See KNOWN_ISSUES.md #008 for pinning root cause and upgrade guidance.
+# ===========================================================================
+
+# Core ADK runtime — GatewayAgent, Agent, Gemini, AdkApp, ASGI server
+# WARNING: Do NOT upgrade without testing the .pth patch still intercepts.
+google-adk==1.31.1
+
+# Vertex AI SDK — ReasoningEngine, AdkApp hosting, staging bucket
+# WARNING: Do NOT upgrade without verifying AuthorizedSession transport is used.
+google-cloud-aiplatform[adk,agent_engines]==1.149.0
+
+# HTTP client — used by fetch_url tool in agent.py
+requests>=2.31.0,<3.0.0
