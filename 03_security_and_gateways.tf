@@ -288,33 +288,29 @@ resource "google_network_security_authz_policy" "egress_sgp_policy" {
   # blocked by the gateway's deny-by-default posture at the routing layer.
 }
 
-# IAP REQUEST_AUTHZ on EGRESS — validates the agent's service identity before
-# allowing outbound calls. Ensures only authorized REs (those whose SA holds
-# roles/iap.httpsResourceAccessor) can make egress calls through this gateway.
-# Reuses the same iap_extension resource as the ingress policy.
-# This mirrors the ingress IAP check — identity validated on the way IN and OUT.
-resource "google_network_security_authz_policy" "egress_iap_policy" {
-  provider = google-beta
+# ==============================================================================
+# ⛔ DO NOT ADD IAP REQUEST_AUTHZ TO THE EGRESS GATEWAY — EVER
+# ==============================================================================
+# Post-mortem: 2026-08-03, charter-poc-test (185602934768)
+# Impact: ALL Reasoning Engines → zero LLM responses for ~2 days
+# Root cause: IAP REQUEST_AUTHZ on egress blocks all outbound HTTP because
+#   RE containers do NOT carry IAP tokens on outbound calls.
+#   IAP sees PRINCIPAL_EMAIL=(empty) → gRPC code 7 → 403 on every egress call.
+#   This breaks LLM calls, OTEL telemetry, sessions — everything.
+#
+# The misleading error message:
+#   "Egress request is not authorized. The endpoint is either incorrect or
+#    unregistered in the Agent Registry."
+# This is NOT an Agent Registry problem. It's IAP identity validation failing.
+# Checking Cloud Logging for resource.type="iap_web" / method=AuthorizeUser /
+# code=7 / empty PRINCIPAL_EMAIL gives the real root cause in seconds.
+#
+# IAP REQUEST_AUTHZ is for INGRESS only (ran-iap-ingress-policy).
+# Egress uses CONTENT_AUTHZ only: Model Armor + SGP.
+# See skill: agw-egress-iap-pitfall
+# ==============================================================================
+# resource "google_network_security_authz_policy" "egress_iap_policy" { DELETED }
 
-  name     = "${var.prefix}-iap-egress-policy"
-  location = var.location
-  project  = var.project_id
-
-  action         = "CUSTOM"
-  policy_profile = "REQUEST_AUTHZ"
-
-  target {
-    resources = [google_network_services_agent_gateway.egress_gateway.id]
-  }
-
-  custom_provider {
-    authz_extension {
-      resources = [google_network_services_authz_extension.iap_extension.id]
-    }
-  }
-
-  depends_on = [google_network_services_authz_extension.iap_extension]
-}
 
 # ==============================================================================
 # INGRESS ENFORCEMENT — RESTRICT DIRECT REASONING ENGINE ACCESS
