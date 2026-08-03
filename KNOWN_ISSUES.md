@@ -24,6 +24,7 @@ ones that failed), the final resolution, and a rollback procedure.
 | 009 | Invalid agent name `chat-agent` — hyphens not allowed; ADK requires Python identifier | 🔴 Critical | ✅ Fixed |
 | 010 | `roles/modelarmor.inspector` does not exist — cannot grant gateway SA MA access via IAM | 🟡 Medium | ✅ Documented (not needed) |
 | 011 | Agent Gateway API hard limit: at most 1 `CONTENT_AUTHZ` policy per `CLIENT_TO_AGENT` ingress gateway | 🟡 Medium | ✅ Documented (platform limit) |
+| 012 | IAP egress: `fail_open=false + ENFORCED` blocks all RE outbound traffic | 🔴 Critical | ✅ Fixed — DRY_RUN deployed |
 
 ---
 
@@ -674,4 +675,198 @@ Removed `google_network_security_authz_policy.ingress_sgp_policy`. SGP governanc
 
 **Workaround:**  
 None available through the Agent Gateway API. Full closure would require the API to support multiple `CONTENT_AUTHZ` policies per gateway direction — tracked for future platform release.
+
+---
+
+## Issue #012 — IAP Egress: `fail_open=false + ENFORCED` Silently Breaks All RE Outbound Traffic
+
+**Status:** ✅ Fixed — DRY_RUN mode deployed; see Promotion Path below for enforcing  
+**Severity:** Critical — ALL outbound LLM calls, OTEL, and session calls silently fail  
+**Discovered:** 2026-07-xx (charter-poc-test) · **Confirmed + Fixed:** 2026-08-03 (geap-agw)  
+
+> See also: `skills/agw-egress-iap-pitfall/SKILL.md` for full root cause and diagnostic commands.
+
+### Symptom
+
+After adding a `REQUEST_AUTHZ` + IAP authz policy to the egress gateway with `fail_open=false`,
+all agent queries return HTTP 200 with **zero events** and an empty response body.
+No obvious error. Cloud Logging shows the RE received the request but no model call was made.
+
+### Root Cause
+
+RE containers make ALL outbound HTTP (LLM inference, OTEL telemetry, session API) **without
+attaching an IAP token**. When IAP's `REQUEST_AUTHZ` runs in `ENFORCED` mode:
+
+1. IAP sees an empty `Authorization` header (no IAP credential)
+2. IAP evaluates the empty principal against `roles/iap.egressor` → no binding found
+3. IAP returns **DENY** (HTTP 403) for every outbound call
+4. The RE container can't reach Vertex AI → model call times out → 0 events returned
+
+With `fail_open=false`, even if IAP itself is unreachable, the result is DENY. The failure
+is completely silent from the caller's perspective — the RE returns HTTP 200 (the inference
+request succeeded at the RE layer) but with an empty body.
+
+### What the Logs Show
+
+```
+# IAP audit log — egress call with ENFORCED mode
+protoPayload.methodName: AuthorizeUser
+protoPayload.authenticationInfo.principalEmail: (empty)   ← no IAP token on outbound call
+protoPayload.status.code: 7   ← PERMISSION_DENIED
+```
+
+### Correct Configuration (Official Docs Pattern)
+
+The [official docs](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/gateways/set-up-agent-gateway#gcloud)
+specify **two separate IAP extensions** — one for ingress (enforcing), one for egress (DRY_RUN):
+
+**Ingress (CLIENT_TO_AGENT)** — `fail_open=false`, ENFORCED:
+```hcl
+# Validates caller identity on every inbound request — blocks unauthenticated callers
+resource "google_network_services_authz_extension" "iap_extension" {
+  fail_open = false        # deny if IAP unreachable
+  metadata = {
+    iapPolicyVersion = "V1"
+    # iamEnforcementMode not set = ENFORCED (default)
+  }
+}
+```
+
+**Egress (AGENT_TO_ANYWHERE)** — `fail_open=true`, DRY_RUN:
+```hcl
+# Audit-only — logs agent identity on outbound calls, NEVER blocks
+resource "google_network_services_authz_extension" "iap_extension_egress" {
+  fail_open = true         # CRITICAL: allow even if IAP unreachable
+  metadata = {
+    iapPolicyVersion   = "V1"
+    iamEnforcementMode = "DRY_RUN"   # audit-only: logs, never denies
+  }
+}
+```
+
+The egress policy targets the egress gateway with `policy_profile = "REQUEST_AUTHZ"` and
+references the DRY_RUN extension. Traffic is never blocked. IAP writes audit log entries
+(`AuthorizeUser`, `status.code=0`) for each outbound call, providing agent identity visibility.
+
+### What DRY_RUN Provides Today
+
+With DRY_RUN deployed (current state):
+
+- ✅ All egress traffic flows normally (agents can call Vertex AI, OTEL, etc.)
+- ✅ IAP fires on every egress call — `AuthorizeUser` entries appear in Cloud Logging
+- ✅ `resource: unregisteredEndpoint` — IAP sees the call but endpoint has no `iap.egressor` binding yet
+- ✅ Status code 0 (OK) — DRY_RUN never denies, only logs
+
+### Promotion Path: DRY_RUN → ENFORCED
+
+When you want IAP to actually **enforce** which agents can call which endpoints (e.g.,
+agent A can only call endpoint X, not Y), follow these steps:
+
+#### Step 1 — Grant `roles/iap.egressor` to each RE service account
+
+Each Reasoning Engine has a service account: `service-PROJECT_NUMBER@gcp-sa-aiplatform-re.iam.gserviceaccount.com`
+
+Grant this SA the `iap.egressor` role **for each Agent Registry endpoint** the agent needs access to:
+
+```bash
+# Find your RE service account
+PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT_ID --format='value(projectNumber)')
+RE_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+
+# Grant iap.egressor for a specific registered endpoint
+# The resource is the Agent Registry entry, not the external host directly
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+  --member="serviceAccount:${RE_SA}" \
+  --role="roles/iap.egressor"
+
+# Or at the registry level (applies to all endpoints in the registry):
+gcloud beta agent-registry registries add-iam-policy-binding REGISTRY_ID \
+  --location=LOCATION \
+  --member="serviceAccount:${RE_SA}" \
+  --role="roles/iap.egressor"
+```
+
+> **Note:** Without `iap.egressor`, all egress is **denied by default** once ENFORCED.
+> Grant this role before switching modes.
+
+#### Step 2 — Monitor DRY_RUN logs to confirm all needed bindings exist
+
+```bash
+# Check IAP audit logs — look for unregisteredEndpoint or PERMISSION_DENIED
+gcloud logging read \
+  'protoPayload.serviceName="iap.googleapis.com" protoPayload.methodName="AuthorizeUser"' \
+  --project=YOUR_PROJECT_ID \
+  --freshness=1h \
+  --format=json | python3 -c "
+import json, sys
+for e in json.load(sys.stdin):
+    pp = e.get('protoPayload', {})
+    print(e['timestamp'][:19],
+          pp.get('resourceName', '?'),
+          pp.get('authenticationInfo', {}).get('principalEmail', '(empty)'),
+          pp.get('status', {}).get('code', 'OK'))
+"
+```
+
+A healthy DRY_RUN log looks like:
+```
+2026-08-03T17:56:52  unregisteredEndpoint  (empty)  0     ← DRY_RUN: allowed, logged
+```
+
+Once `iap.egressor` is granted, it will look like:
+```
+2026-08-03T...  projects/.../registries/.../endpoints/...  re-sa@...  0  ← registered, allowed
+```
+
+#### Step 3 — Promote to ENFORCED in Terraform
+
+In `03_security_and_gateways.tf`, change the egress extension:
+
+```hcl
+resource "google_network_services_authz_extension" "iap_extension_egress" {
+  fail_open = false   # ← was true
+  metadata = {
+    iapPolicyVersion   = "V1"
+    iamEnforcementMode = "ENFORCED"   # ← was "DRY_RUN"
+  }
+}
+```
+
+Then apply:
+```bash
+terraform apply -target=google_network_services_authz_extension.iap_extension_egress -auto-approve
+```
+
+#### Step 4 — Smoke test immediately
+
+```bash
+# Run guardrail tests — ALLOW cases must still pass
+.venv/bin/python test-agent/run_guardrail_tests.py \
+  --project YOUR_PROJECT_ID --location YOUR_REGION --agent-name chat_agent
+```
+
+If ALLOW tests fail (empty responses), check IAP logs for `code: 7` (PERMISSION_DENIED)
+and go back to Step 1 to add missing `iap.egressor` grants.
+
+### Rollback (if ENFORCED breaks egress)
+
+```bash
+# Immediate: revert to DRY_RUN via gcloud
+cat > /tmp/iap-ext-egress.yaml << EOF
+name: ${PREFIX}-iap-extension-egress
+service: iap.googleapis.com
+failOpen: true
+timeout: 1s
+metadata:
+  iapPolicyVersion: "V1"
+  iamEnforcementMode: "DRY_RUN"
+EOF
+
+gcloud beta service-extensions authz-extensions import ${PREFIX}-iap-extension-egress \
+  --source=/tmp/iap-ext-egress.yaml \
+  --location=YOUR_REGION \
+  --project=YOUR_PROJECT_ID
+```
+
+Then `terraform apply` to reconcile state.
 
