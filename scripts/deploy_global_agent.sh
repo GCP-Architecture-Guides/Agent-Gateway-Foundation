@@ -408,21 +408,21 @@ if [ -n "$NEW_RE_ID" ]; then
 
   echo "  Waiting for RE $NEW_RE_ID to become ACTIVE..."
   RE_STATE="UNKNOWN"
-  for i in $(seq 1 30); do
+  for i in $(seq 1 60); do
     sleep 5
     RE_STATE=$(
       curl -s -H "Authorization: Bearer $PATCH_TOKEN" \
         "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines/$NEW_RE_ID" \
       | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('state','UNKNOWN'))" 2>/dev/null
     )
-    echo "  [attempt $i/30] state=$RE_STATE"
+    echo "  [attempt $i/60] state=$RE_STATE"
     if [ "$RE_STATE" = "ACTIVE" ]; then
       echo "  ✅ RE is ACTIVE — contextSpec stripped successfully."
       break
     fi
   done
   if [ "$RE_STATE" != "ACTIVE" ]; then
-    echo "  ⚠️  RE did not reach ACTIVE in 150s — final state: $RE_STATE"
+    echo "  ⚠️  RE did not reach ACTIVE in 300s — final state: $RE_STATE"
     echo "  ⚠️  Check Cloud Logging for startup errors."
   fi
 else
