@@ -390,16 +390,16 @@ resource "google_network_security_authz_policy" "egress_sgp_policy" {
 #   Use serviceAccount:, user:, or group: format.
 # ==============================================================================
 
-# IAP Authz Extension — always created (service identity validation is always needed)
-# Note: iapPolicyVersion = "V1" is REQUIRED in metadata per the official spec.
-# fail_open = false is REQUIRED per official docs — deny if IAP unreachable (fail-closed).
+# IAP Authz Extension (INGRESS) — fail-closed, enforcing
+# fail_open = false: deny if IAP unreachable (correct for ingress — we MUST validate caller identity)
+# iamEnforcementMode not set = ENFORCED (default)
 resource "google_network_services_authz_extension" "iap_extension" {
   provider = google-beta
 
   name      = "${var.prefix}-iap-extension"
   location  = var.location
   project   = var.project_id
-  fail_open = false # explicit fail-closed per official docs — deny if IAP unreachable
+  fail_open = false # fail-closed: deny inbound requests if IAP unreachable
 
   # Global IAP service endpoint (not a regional REP endpoint like Model Armor)
   service = "iap.googleapis.com"
@@ -407,6 +407,43 @@ resource "google_network_services_authz_extension" "iap_extension" {
 
   metadata = {
     iapPolicyVersion = "V1" # Required — extension rejects requests without this
+  }
+
+  depends_on = [google_project_service.iap]
+}
+
+# IAP Authz Extension (EGRESS) — fail-OPEN, DRY_RUN mode
+#
+# WHY fail_open=true + DRY_RUN:
+#   RE containers make outbound HTTP without IAP credentials attached.
+#   With fail_open=false + ENFORCED (our previous config), IAP sees empty
+#   principal and DENIES all egress — breaking ALL outbound LLM calls.
+#
+#   Official docs pattern (set-up-agent-gateway#gcloud): use fail_open=true
+#   and iamEnforcementMode=DRY_RUN on egress. This means IAP:
+#     - Never blocks traffic (fail-open = allow if IAP call fails)
+#     - Generates audit logs for agent identity visibility
+#     - Checks roles/iap.egressor for registered endpoints (audit-only)
+#
+#   To promote to ENFORCED later (when agents carry proper IAP creds):
+#     Change iamEnforcementMode to "ENFORCED" and fail_open to false.
+#     Requires granting roles/iap.egressor to each RE service account first.
+#
+# See: skills/agw-egress-iap-pitfall/SKILL.md for full root cause analysis.
+resource "google_network_services_authz_extension" "iap_extension_egress" {
+  provider = google-beta
+
+  name      = "${var.prefix}-iap-extension-egress"
+  location  = var.location
+  project   = var.project_id
+  fail_open = true # CRITICAL: fail-open — never block egress if IAP unreachable
+
+  service = "iap.googleapis.com"
+  timeout = "1s"
+
+  metadata = {
+    iapPolicyVersion    = "V1"
+    iamEnforcementMode  = "DRY_RUN" # Audit-only: logs identity checks, never blocks
   }
 
   depends_on = [google_project_service.iap]
@@ -439,11 +476,40 @@ resource "google_network_security_authz_policy" "ingress_iap_policy" {
 }
 
 # ==============================================================================
-# NOTE: IAP IAM grants removed (b1667ea).
-# IAP REQUEST_AUTHZ was removed from the egress gateway after confirming it
-# blocked all outbound RE traffic (RE containers don't carry IAP tokens).
-# See: skills/agw-egress-iap-pitfall/SKILL.md for full root cause.
+# IAP EGRESS AUTHZ POLICY — DRY_RUN (audit-only, never blocks)
+# ==============================================================================
+# Attaches the egress IAP extension to the egress gateway.
+# Profile: REQUEST_AUTHZ — uses the DRY_RUN extension, so never blocks egress.
+# Purpose: agent identity visibility in Cloud Logging audit logs.
 #
+# To promote to enforcing mode:
+#   1. Grant roles/iap.egressor to each RE service account for each endpoint
+#   2. Change iap_extension_egress.metadata.iamEnforcementMode to "ENFORCED"
+#   3. Change iap_extension_egress.fail_open to false
+# ==============================================================================
+resource "google_network_security_authz_policy" "egress_iap_policy" {
+  provider = google-beta
+
+  name     = "${var.prefix}-iap-egress-policy"
+  location = var.location
+  project  = var.project_id
+
+  action         = "CUSTOM"
+  policy_profile = "REQUEST_AUTHZ"
+
+  target {
+    resources = [google_network_services_agent_gateway.egress_gateway.id]
+  }
+
+  custom_provider {
+    authz_extension {
+      resources = [google_network_services_authz_extension.iap_extension_egress.id]
+    }
+  }
+
+  depends_on = [google_network_services_authz_extension.iap_extension_egress]
+}
+
 # NOTE: roles/networkservices.agentGatewayUser removed — role does not exist
 # in GCP IAM (confirmed: gcloud iam roles describe returns NOT FOUND).
 # ==============================================================================
