@@ -110,8 +110,8 @@ output "registered_egress_endpoints" {
 }
 
 output "re_agent_registry_viewer" {
-  value       = google_project_iam_member.re_agent_registry_viewer.member
-  description = "The RE service agent identity granted roles/agentregistry.viewer (can discover all registered endpoints)."
+  value       = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+  description = "The RE service agent identity granted roles/agentregistry.viewer (can discover all registered endpoints). Note: this SA is created by Vertex AI on first RE deploy."
 }
 
 # --- Project ---
