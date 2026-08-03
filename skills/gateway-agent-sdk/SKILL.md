@@ -147,17 +147,41 @@ WHY THE OLD SKILL HAD _get_client_args():
     In ADK 1.31+, this method is DEAD CODE — it is never called. The correct
     extension point is the `api_client` property, but overriding it to use
     `location="global"` breaks PSC routing (see above).
+## 2. GlobalGemini — Regional (pass-through) vs Global (env var)
 
-WHEN TO RE-ENABLE GLOBAL ENDPOINT:
-    Only if all of the following are true:
-    1. The specific Gemini model returns 404 at the regional endpoint
-    2. The PSC egress has been extended to also route aiplatform.googleapis.com
-       (the global endpoint, no region prefix)
-    3. The gateway team has confirmed the global routing is supported
+`GlobalGemini` is a subclass of ADK's `Gemini`. For Agent Gateway RE deployments,
+it is a **pass-through** — no `api_client` override.
+
+The endpoint is controlled entirely by the `GOOGLE_CLOUD_LOCATION` env var:
+
+| Deployment | `GOOGLE_CLOUD_LOCATION` | Endpoint constructed | Deploy script |
+|---|---|---|---|
+| `chat-agent` (gemini-2.5-flash) | `us-east1` | `us-east1-aiplatform.googleapis.com` | `deploy_chat_agent.sh` |
+| `global-agent` (gemini-3.5-flash) | `global` | `aiplatform.googleapis.com` | `deploy_global_agent.sh` |
+
+```python
+# lib/gateway_agent/global_gemini.py
+from google.adk.models.google_llm import Gemini
+
+class GlobalGemini(Gemini):
+    """Pass-through — endpoint determined by GOOGLE_CLOUD_LOCATION env var.
+
+    Regional: GOOGLE_CLOUD_LOCATION=us-east1 → us-east1-aiplatform.googleapis.com
+    Global:   GOOGLE_CLOUD_LOCATION=global   → aiplatform.googleapis.com (Gemini 3.x)
+
+    No api_client override needed for either case in RE deployments.
+    See: skills/vertex-ai-global-endpoint-adk/SKILL.md for full context.
+    """
+    pass  # No overrides needed
+```
+
+> **Cloud Run only:** If deploying on Cloud Run (not RE), the `api_client`
+> property override works and is the cleaner approach for Cloud Run because
+> `GOOGLE_CLOUD_LOCATION=global` also breaks session management there.
+> See `skills/vertex-ai-global-endpoint-adk/SKILL.md §2` for Cloud Run pattern.
 """
 
 from google.adk.models.google_llm import Gemini
-
 
 class GlobalGemini(Gemini):
     """Drop-in replacement for Gemini() — uses regional endpoint via PSC.
@@ -595,9 +619,12 @@ mod-agw-foundation/variables.tf  ← allowed_egress_hosts includes telemetry.goo
 | Q2/Q4 fail, Q1/Q3/Q5 pass (alternating pattern) | OTEL BatchSpanProcessor blocking 10-15s on TCP SYN to `telemetry.googleapis.com` (PSC drop) | Add `OTEL_EXPORTER_OTLP_TIMEOUT=2000`, `OTEL_BSP_EXPORT_TIMEOUT_MILLIS=2000`, `OTEL_BSP_SCHEDULE_DELAY_MILLIS=15000` |
 | Traces not appearing in Cloud Trace | `telemetry.googleapis.com` not in PSC egress allowlist | Add to `allowed_egress_hosts` in `variables.tf` |
 | Token usage still zero in dashboard | `after_model_callback` overridden downstream | Pass your callback as `after_model_callback=` arg — GatewayAgent chains it |
-| 0 events and logs show `ValueError: Context has already been used` | OTEL mTLS crash (see above) | `GOOGLE_API_USE_MTLS_ENDPOINT=never` |
-| Model returns 404 at regional endpoint | Model not yet available regionally | Check Vertex AI model availability table; do NOT blindly add `location="global"` to GlobalGemini — extend PSC first |
-| `_get_client_args` override has no effect | Dead code in ADK 1.31+ | Override `api_client` property instead; but read PSC warning above |
+| **Do NOT:** | | |
+| - Import `Agent` directly from `google.adk.agents` | - use `GatewayAgent` | - |
+| - Set `after_model_callback` manually | - `GatewayAgent` chains it | - |
+| - Omit 3-layer OTEL env vars | - agent will crash on Q2+ | - |
+| - Add `hosts { exact = "aiplatform.googleapis.com" }` to MA egress | - causes 500 empty message for Gemini 3.x | - |
+| `404 Model not found` on regional endpoint | Model requires global endpoint | Use `deploy_global_agent.sh` which sets `GOOGLE_CLOUD_LOCATION=global` |
 
 ---
 

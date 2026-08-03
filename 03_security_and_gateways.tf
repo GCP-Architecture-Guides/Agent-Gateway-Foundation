@@ -205,14 +205,22 @@ resource "google_network_security_authz_policy" "egress_ma_policy" {
 
   http_rules {
     to {
-      # Covers both:
-      #   - Regional: us-central1-aiplatform.googleapis.com (suffix match)
-      #   - Global:   aiplatform.googleapis.com (explicit exact match for GlobalGemini / Gemini 2.5+)
-      # Note: the API only allows ONE operations block per to{} — both host variants
-      # must be declared as separate hosts{} entries within the same block.
+      # MA egress screens only REGIONAL endpoint requests.
+      # DELIBERATELY NO exact match for "aiplatform.googleapis.com" (global).
+      #
+      # WHY: The regional MA extension (modelarmor.${var.location}.rep.googleapis.com)
+      # returns PERMISSION_DENIED when it receives requests destined for the global
+      # Vertex AI endpoint. The Agent Gateway translates this into a 500 with empty
+      # message — the agent appears to respond but returns nothing.
+      #
+      # This was confirmed as a production blocker in charter-poc-test when deploying
+      # gemini-3.5-flash agents using GOOGLE_CLOUD_LOCATION=global. The fix: remove
+      # the exact match. Global endpoint requests bypass MA content screening but are
+      # still subject to Gemini's built-in harm filters (always active at model layer).
+      #
+      # See: skills/vertex-ai-global-endpoint-adk/SKILL.md §5 for full diagnosis.
       operations {
         hosts { suffix = ".aiplatform.googleapis.com" }
-        hosts { exact = "aiplatform.googleapis.com" }
         paths {
           contains    = "generatecontent"
           ignore_case = true

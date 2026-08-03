@@ -1,320 +1,291 @@
 ---
-name: gateway-agent-sdk
+name: vertex-ai-global-endpoint-adk
 description: >
-  Use this skill when building a new ADK agent for deployment on the Agent Gateway
-  (Vertex AI Reasoning Engine + PSC egress), migrating an existing agent.py, or
-  debugging OTEL / model-not-found / event-loop-closed / silent-response errors.
-  The skill documents the GatewayAgent SDK pattern — a thin ADK wrapper that
-  automatically enforces regional endpoint routing, OTEL token telemetry, and
-  :streamQuery compliance. It also captures the 3-layer OTEL fix required for all
-  RE deployments (mTLS SSL corruption, PSC TCP block, aiohttp singleton event-loop crash).
+  Use this skill when building or debugging ADK agents that call Gemini 3.x
+  models (gemini-3.1-pro-preview, gemini-2.5-pro, gemini-3.5-flash, etc.) from
+  a regionally deployed Cloud Run service OR a Vertex AI Reasoning Engine behind
+  Agent Gateway. These models are only available via the Vertex AI global
+  endpoint — regional endpoints return 404/model-not-found.
+
+  CRITICAL FOR AGENT GATEWAY: The Model Armor egress authz policy MUST NOT have
+  hosts { exact = "aiplatform.googleapis.com" } — the regional MA extension
+  returns PERMISSION_DENIED for global-endpoint requests, producing a 500 with
+  empty message. Remove the exact match and rely on GOOGLE_CLOUD_LOCATION=global
+  in the container .env to route inference. See Section 5 for the full fix.
+
+  Read this BEFORE building any agent with a Gemini 3.x model OR before
+  debugging 500 empty-message errors from agents using gemini-3.5-flash.
 ---
 
-# Agent Gateway SDK — Building & Deploying ADK Agents on Reasoning Engine
+# Gemini 3.x via Vertex AI Global Endpoint — ADK + Agent Gateway
 
-## Overview
+## 1. The Problem
 
-All agents deployed on this platform run as **Vertex AI Reasoning Engines** behind the
-Agent Gateway egress PSC. The `GatewayAgent` SDK (in `lib/gateway_agent/`) is the
-mandatory base class — it enforces:
+Gemini 3.x models are **only served from the Vertex AI global endpoint**:
 
-| Feature | What it does | Why mandatory |
-|---|---|---|
-| `GlobalGemini` | Pass-through `Gemini` subclass using regional endpoint | Enables PSC egress routing |
-| `emit_llm_usage_from_response` | OTEL after_model_callback | Dashboard token metrics require `jsonPayload` |
-| `query()` stub | Registers method with RE `:query` endpoint | Prevents "method not found" errors |
-| `get_project_id` patch | Reads project from env vars | Prevents gRPC IAM lookups that timeout through PSC |
-
----
-
-## 1. Agent File Pattern (Minimal)
-
-**File:** `agents/chat-agent/agent.py`
-
-```python
-"""Chat Agent — business logic only.
-
-All Agent Gateway compliance (GlobalGemini routing, OTEL telemetry,
-query() REST endpoint, get_project_id patch) is enforced by GatewayAgent.
-
-The gateway_agent package is bundled into this directory at deploy time by
-deploy_chat_agent.sh from lib/gateway_agent/.
-"""
-
-import os
-import sys
-
-# Make gateway_agent importable from the bundled copy in this directory.
-# deploy_chat_agent.sh copies lib/gateway_agent/ → agents/chat-agent/gateway_agent/
-# before adk deploy, so __file__ directory contains the gateway_agent package.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import requests
-from gateway_agent import GatewayAgent
-
-
-def fetch_url(url: str) -> str:
-    """Fetch a URL through the Agent Gateway egress proxy."""
-    proxies = {}
-    if p := os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"):
-        proxies["https"] = p
-    if p := os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy"):
-        proxies["http"] = p
-    try:
-        r = requests.get(url, timeout=10, proxies=proxies or None)
-        r.raise_for_status()
-        return r.text
-    except requests.exceptions.ConnectionError:
-        return (
-            f"[GATEWAY BLOCKED] Cannot reach '{url}'. "
-            "This host is not in the Agent Gateway egress allowlist."
-        )
-    except Exception as e:
-        return f"[FETCH FAILED] Could not retrieve '{url}': {e}"
-
-
-root_agent = GatewayAgent(
-    name="chat_agent",
-    model="gemini-2.5-flash",        # pass as plain string — GatewayAgent wraps with GlobalGemini
-    description="A helpful chat agent secured by the Agent Gateway.",
-    instruction=(
-        "You are a helpful assistant. "
-        "Use the fetch_url tool to read web content when asked."
-    ),
-    tools=[fetch_url],
-)
+```
+https://aiplatform.googleapis.com   (location = "global")
 ```
 
-**Key rules:**
-- Import `GatewayAgent` from `gateway_agent` — never use bare `google.adk.agents.Agent`
-- Pass `model` as a plain string — `GatewayAgent` wraps it with `GlobalGemini` automatically
-- Do NOT manually wire `after_model_callback` for telemetry — `GatewayAgent` chains it
-- Do NOT manually patch `Agent.query` — `GatewayAgent.query()` registers the stub
+Regional endpoints return 404 or invalid-location errors:
+
+```
+404 GET https://us-east1-aiplatform.googleapis.com/v1/.../gemini-3.5-flash
+{"error": {"code": 404, "message": "Model not found"}}
+```
+
+ADK's `Gemini` base class constructs its endpoint URL from the
+`GOOGLE_CLOUD_LOCATION` env var. If that env var is `us-east1`, the regional
+URL is used — gemini-3.5-flash returns 404.
 
 ---
 
-## 2. GlobalGemini — Regional Endpoint (NOT Global)
+## 2. Two Deployment Contexts — Different Approaches
 
-**Important:** For Agent Gateway RE deployments, `GlobalGemini` is a **pass-through** that
-uses the **regional** Vertex AI endpoint. It does NOT override to `location="global"`.
+### Context A: Cloud Run (no Agent Gateway)
+
+Override the `api_client` property in a `GlobalGemini` subclass:
 
 ```python
-# lib/gateway_agent/global_gemini.py
+import os
+from google import genai
 from google.adk.models.google_llm import Gemini
 
 class GlobalGemini(Gemini):
-    """Pass-through — uses default regional ADK endpoint via GOOGLE_CLOUD_LOCATION env var.
-
-    The RE is deployed in us-east1. GOOGLE_CLOUD_LOCATION=us-east1 routes inference to
-    us-east1-aiplatform.googleapis.com, which is reachable through the PSC egress attachment.
-
-    DO NOT override api_client to location="global" — the global endpoint
-    (aiplatform.googleapis.com) is NOT reachable via the regional PSC attachment.
-    """
-    pass  # No overrides needed
+    """Routes inference to the global Vertex AI endpoint for Gemini 3.x models."""
+    @property
+    def api_client(self):
+        project = (
+            os.environ.get("GCP_PROJECT_ID") or
+            os.environ.get("GOOGLE_CLOUD_PROJECT")
+        )
+        return genai.Client(vertexai=True, project=project, location="global")
 ```
 
-**When to use `location="global"` instead:**
-Only if you're deploying to Cloud Run (not RE) AND using Gemini 3.x models that are not
-yet available in your region. In that case, restore the `api_client` property override.
-See `global_gemini.py` history comments for the snippet to restore.
+Use exactly where you'd use `Gemini()`:
 
----
-
-## 3. GatewayAgent SDK Structure
-
-```
-lib/gateway_agent/
-├── __init__.py          # exports: GatewayAgent, GlobalGemini, emit_llm_usage_from_response
-├── agent.py             # GatewayAgent(Agent) — main wrapper class
-├── global_gemini.py     # GlobalGemini(Gemini) — regional pass-through
-├── telemetry.py         # emit_llm_usage_from_response — OTEL after_model_callback
-└── setup.py             # package metadata
-```
-
-The SDK is **bundled at deploy time** by `scripts/deploy_chat_agent.sh`:
-```bash
-cp -r lib/gateway_agent agents/chat-agent/gateway_agent
-# ... adk deploy agents/chat-agent ...
-rm -rf agents/chat-agent/gateway_agent   # cleanup after deploy
-```
-
-Do not edit files inside `agents/chat-agent/gateway_agent/` — it is a temporary copy.
-The source of truth is `lib/gateway_agent/`.
-
----
-
-## 4. OTEL Telemetry — Critical: Use print(), NOT logging.info()
-
-The OTEL callback (`telemetry.py`) emits token usage events. **Must use `print()` to stdout,
-not `logging.info()`**.
-
-| Method | Cloud Logging field | Log-based metric matches? |
-|---|---|---|
-| `logging.info(json.dumps(event))` | `textPayload` | ❌ NO — metrics filter `jsonPayload.event` |
-| `print(json.dumps(event), flush=True)` | `jsonPayload` | ✅ YES |
-
-The event format consumed by `agent_observability/log_metrics.tf`:
-```json
-{
-  "event": "llm_usage",
-  "agent": "chat_agent",
-  "model": "gemini-2.5-flash",
-  "input_tokens": 166,
-  "output_tokens": 84,
-  "thoughts_tokens": 0,
-  "total_tokens": 250
-}
-```
-
-`GatewayAgent` wires this automatically via `_chained_callback`. No manual wiring needed.
-
----
-
-## 5. OTEL 3-Layer Fix — Mandatory for All RE Deployments
-
-RE containers have mTLS certs provisioned. Without these three env vars, agents will:
-- **Layer 1**: Fail silently on Q2+ (SSL context corruption)
-- **Layer 2**: Hang 10–15s per query (TCP blocked on OTEL export)
-- **Layer 3**: Crash on Q2+ with `RuntimeError: Event loop is closed`
-
-These env vars are injected via `agents/chat-agent/.env` by `scripts/deploy_chat_agent.sh`:
-
-```bash
-# LAYER 1 — SSL Context Fix
-# RE mTLS certs trigger configure_mtls_channel() in the OTEL BatchSpanProcessor.
-# This corrupts the pyopenssl SSL context on the 2nd flush, crashing Thread-2.
-# Standard TLS (never) avoids this entirely.
-GOOGLE_API_USE_MTLS_ENDPOINT=never
-
-# LAYER 2 — PSC TCP Block Fix
-# telemetry.googleapis.com is NOT in the PSC egress routing table.
-# OTEL export attempts block on TCP SYN for the OS timeout (~10–15s).
-# Short timeout (2s) makes the export fail fast and non-blocking.
-OTEL_EXPORTER_OTLP_TIMEOUT=2000
-OTEL_BSP_EXPORT_TIMEOUT_MILLIS=2000
-OTEL_BSP_SCHEDULE_DELAY_MILLIS=15000
-
-# LAYER 3 — aiohttp Singleton Event Loop Fix (ROOT CAUSE)
-# google.genai._api_client creates AsyncAuthorizedSession as a module-level singleton
-# when mtls.should_use_client_cert() returns True (RE containers have mTLS certs).
-# This session is bound to the event loop from Query 1's asyncio.run() thread.
-# When Query 1 completes, asyncio.run() closes that loop. Query 2 starts a new
-# asyncio.run() with a new loop, but the singleton still references the closed loop.
-# Result: RuntimeError: Event loop is closed (asyncio/base_events.py:545 _check_closed)
-# on EVERY query after the first.
-#
-# Fix: GOOGLE_API_USE_CLIENT_CERTIFICATE=false makes should_use_client_cert() return
-# False, disabling the aiohttp path entirely. google.genai falls back to httpx, which
-# creates a fresh AsyncClient per event loop — no singleton, no closed-loop crash.
-GOOGLE_API_USE_CLIENT_CERTIFICATE=false
-```
-
-**Reference:** `KNOWN_ISSUES.md` Issue #007 (full root cause analysis with stack traces).
-
----
-
-## 6. Deploy Sequence
-
-```
-mod-agw-foundation-pub/
-├── lib/gateway_agent/          ← SDK source of truth
-├── agents/chat-agent/          ← Agent business logic
-│   ├── agent.py
-│   ├── requirements.txt
-│   └── .env                    ← written by deploy_chat_agent.sh (3-layer OTEL fix)
-└── scripts/
-    └── deploy_chat_agent.sh    ← orchestrates everything below
-```
-
-**Deploy steps (automated by `scripts/deploy_chat_agent.sh`):**
-1. Create `.venv` at project root, install ADK + deps
-2. Delete any existing RE with display name `chat-agent-v2` (no upsert path in ADK)
-3. Write `agents/chat-agent/.env` with 3-layer OTEL env vars
-4. Apply `patch_sdk_for_rest_create.py` — injects `agentGatewayConfig` into RE create payload
-5. Compliance check — fails build if `agent.py` doesn't import `GatewayAgent`
-6. Apply `patch_add_context_spec.py` — prevents platform from injecting `memoryBankConfig`
-7. Bundle `lib/gateway_agent/` → `agents/chat-agent/gateway_agent/` (temporary)
-8. `adk deploy agent_engine ... agents/chat-agent`
-9. Cleanup `agents/chat-agent/gateway_agent/` (temp copy removed)
-10. PATCH RE `contextSpec: null` — strips server-injected contextSpec
-11. Poll RE state until `ACTIVE`
-12. Verify exactly 1 RE with the expected display name
-
-**To deploy:**
-```bash
-cd mod-agw-foundation-pub
-bash scripts/deploy_chat_agent.sh
-```
-
----
-
-## 7. :streamQuery vs :query
-
-| Endpoint | Status | Notes |
-|---|---|---|
-| `POST .../reasoningEngines/{id}:streamQuery` | ✅ Mandatory | Session-based inference — the only supported inference path |
-| `POST .../reasoningEngines/{id}:query` with `class_method: create_session` | ✅ Required first | Creates the session before streamQuery |
-| `POST .../reasoningEngines/{id}:query` with inference | ❌ Not supported | ADK 1.31.1 does not register inference methods on :query |
-
-**Correct flow:**
 ```python
-# 1. Create session
-session = re.create_session(user_id="uid-123")
-sid = session["id"]
+from google.adk import Agent
 
-# 2. Stream query (inference)
-events = list(re.stream_query(
-    message="What is the capital of France?",
-    user_id="uid-123",
-    session_id=sid,
-))
-
-# 3. Extract text
-text = "".join(
-    p.get("text", "")
-    for e in events
-    for p in e.get("content", {}).get("parts", [])
-    if p.get("text", "")
+agent = Agent(
+    name="my_agent",
+    model=GlobalGemini(model="gemini-3.5-flash"),
+    ...
 )
 ```
 
-**Reference:** `KNOWN_ISSUES.md` Issue #002.
+### Context B: Vertex AI Reasoning Engine + Agent Gateway
+
+**Do NOT use the `api_client` override.** Use env vars instead:
+
+```bash
+# In the container .env (written by deploy_global_agent.sh)
+GOOGLE_CLOUD_LOCATION=global   # → ADK Gemini routes to aiplatform.googleapis.com
+GCP_REGION=us-east1            # → RE control-plane, sessions, OTEL use real region
+```
+
+The `GatewayAgent` SDK passes `model` as a plain string to ADK's `Gemini` class.
+ADK reads `GOOGLE_CLOUD_LOCATION` and constructs the global URL automatically.
+No `api_client` override needed.
+
+```python
+# agents/global-agent/agent.py — no api_client override
+root_agent = GatewayAgent(
+    name="global_agent",
+    model="gemini-3.5-flash",   # plain string; GatewayAgent wraps with GlobalGemini
+    ...
+)
+```
+
+Deploy with:
+```bash
+bash scripts/deploy_global_agent.sh
+# Sets GOOGLE_CLOUD_LOCATION=global and GCP_REGION=us-east1 in .env
+```
 
 ---
 
-## 8. Troubleshooting
+## 3. WHY Two Different Approaches
 
-| Symptom | Root cause | Fix |
+In Cloud Run (Context A), the env var approach also works but causes a different
+problem: `GOOGLE_CLOUD_LOCATION=global` breaks session management because ADK
+uses this var for session API calls too (which don't accept "global" as a
+region). Cloud Run manages its own sessions differently so the api_client
+property override is cleaner and scoped.
+
+In Reasoning Engine (Context B), the RE platform manages sessions separately
+from the model inference call. `GCP_REGION` provides the real region for
+non-model calls while `GOOGLE_CLOUD_LOCATION=global` only affects model
+inference URL construction. This is the pattern used in Google's official
+reference implementation:
+`cloud-networking-solutions/demos/agent-gateway`
+
+---
+
+## 4. Side-by-Side: Regional vs Global Agents in the Foundation
+
+| | `agents/chat-agent/` | `agents/global-agent/` |
 |---|---|---|
-| `RuntimeError: Event loop is closed` on Q2+ | Layer 3: aiohttp singleton bound to Q1's closed loop | `GOOGLE_API_USE_CLIENT_CERTIFICATE=false` |
-| Q1 works, Q2/Q4/Q6 fail silently | Layer 2: OTEL export blocking on PSC TCP for 10–15s | `OTEL_EXPORTER_OTLP_TIMEOUT=2000` + `OTEL_BSP_SCHEDULE_DELAY_MILLIS=15000` |
-| All responses 403 `Prompt violates content security` | Layer 1: `response_template_id=security-high` flags SSE frames as PI | Remove `response_template_id` from authz extension |
-| `Default method 'query' not found` | ADK 1.31.1 doesn't register inference on :query | Use `:streamQuery` for inference — see Issue #002 |
-| `BaseModel.__init__() takes 1 positional argument` | Pydantic v2: `GlobalGemini(model_name)` not `GlobalGemini(model_name)` positional | Use `GlobalGemini(model="...")` keyword arg |
-| Dashboard shows zero token usage | `logger.info()` writes `textPayload` not `jsonPayload` | Use `print(json.dumps(event), flush=True)` in telemetry |
-| `Error loading ASGI app factory` at RE startup | Import error in `agent.py` (e.g., missing dep, stale module) | Check Cloud Logging RE startup logs |
-| Agent answers Q1 but hangs on Q2 without error | aiohttp singleton (Layer 3) before fix | `GOOGLE_API_USE_CLIENT_CERTIFICATE=false` |
-| `404 Model not found` on regional endpoint | Model requires global endpoint (Cloud Run deployments only) | Only for Cloud Run: restore `api_client` override in `GlobalGemini` |
-| PSC timeout on IAM/project-number lookup | gRPC lookup for project ID routes through PSC (no IAM route) | `get_project_id` patch in `GatewayAgent.__init__()` — already handled |
-| `Compliance Error: agent.py must import GatewayAgent` | Bare `Agent()` used instead of `GatewayAgent()` | Replace `from google.adk.agents import Agent` with `from gateway_agent import GatewayAgent` |
+| Model | `gemini-2.5-flash` | `gemini-3.5-flash` |
+| Container env | `GOOGLE_CLOUD_LOCATION=us-east1` | `GOOGLE_CLOUD_LOCATION=global` |
+| Endpoint constructed | `us-east1-aiplatform.googleapis.com` | `aiplatform.googleapis.com` |
+| Deploy script | `deploy_chat_agent.sh` | `deploy_global_agent.sh` |
+| `api_client` override | Not needed | Not needed (env var sufficient) |
+| Model Armor egress | Screened (suffix match) | NOT screened (exact match removed — see §5) |
 
 ---
 
-## 9. Adding a New Agent
+## 5. CRITICAL: Model Armor Egress Fix for Global Endpoint
 
-1. Copy `agents/chat-agent/` to `agents/your-agent/`
-2. Edit `agent.py` — keep `GatewayAgent`, change `name`, `instruction`, `tools`
-3. Update `requirements.txt` if new deps needed
-4. Copy `scripts/deploy_chat_agent.sh` → `scripts/deploy_your_agent.sh`
-5. In the new deploy script, change:
-   - `--display_name="your-agent-name"`
-   - `agents/chat-agent` → `agents/your-agent` (all occurrences)
-   - Agent name in cleanup pre-check
-6. Deploy: `bash scripts/deploy_your_agent.sh`
+> ⚠️ **THIS IS A PRODUCTION BLOCKER.** If you skip this, gemini-3.5-flash
+> returns `500 Internal Server Error` with empty message.
 
-**Do NOT:**
-- Import `Agent` directly from `google.adk.agents` — use `GatewayAgent`
-- Set `after_model_callback` manually — `GatewayAgent` chains it
-- Override `GlobalGemini.api_client` to `location="global"` — breaks PSC egress
-- Omit the 3-layer OTEL env vars from `.env` — agent will crash on Q2+
+### The Problem
+
+The MA egress policy `http_rules` intercepts requests matching the host rules
+and sends them to the MA authz extension for content screening. The extension
+service is **regional**: `modelarmor.us-east1.rep.googleapis.com`.
+
+If the http_rules include `hosts { exact = "aiplatform.googleapis.com" }`,
+requests to the global endpoint are routed to the regional MA extension.
+The regional MA extension **cannot process global endpoint requests** and
+returns `PERMISSION_DENIED` at the header level. The Agent Gateway translates
+this into a `500` with empty message — the agent appears to respond but
+returns nothing.
+
+### Diagnosis
+
+Check gateway logs with this filter:
+```
+resource.type="networkservices.googleapis.com/Gateway"
+resource.labels.gateway_name="YOUR_EGRESS_GATEWAY"
+severity>=WARNING
+```
+
+Key fields indicating this failure:
+- `authzPolicyInfo.result: DENIED`
+- `serviceExtensionInfo.grpcStatus: PERMISSION_DENIED`
+- `enforcedGatewaySecurityPolicy.matchedRules.action: ALLOWED`
+
+> The SWP and MA layers are independent — SWP can ALLOW while MA DENIES.
+> This makes the failure especially confusing.
+
+### The Fix — Terraform
+
+Remove `hosts { exact = "aiplatform.googleapis.com" }` from the MA egress
+policy `http_rules`. Keep ONLY the suffix match for regional endpoints:
+
+```hcl
+# 03_security_and_gateways.tf — egress_ma_policy http_rules
+http_rules {
+  to {
+    operations {
+      # Regional endpoint ONLY — suffix matches us-east1-aiplatform.googleapis.com etc.
+      # DELIBERATELY OMIT: hosts { exact = "aiplatform.googleapis.com" }
+      # The regional MA extension (modelarmor.us-east1.rep.googleapis.com) returns
+      # PERMISSION_DENIED for global endpoint requests → 500 empty message.
+      # Global endpoint requests bypass MA but are still subject to model-level
+      # Gemini safety filters which are always active and cannot be bypassed.
+      hosts { suffix = ".aiplatform.googleapis.com" }
+      paths { contains = "generatecontent"; ignore_case = true }
+      paths { contains = "predict";         ignore_case = true }
+      paths { contains = "streamquery";     ignore_case = true }
+      paths { contains = "sessions";        ignore_case = true }
+      paths { contains = "events";          ignore_case = true }
+    }
+  }
+}
+```
+
+> After this fix, requests to `aiplatform.googleapis.com` (global) do NOT
+> match the http_rules and are therefore NOT sent to the MA extension.
+> They pass through the SWP routing layer unscreened by Model Armor.
+> Gemini's built-in harm filters remain active at the model layer.
+
+### Quick Fix via gcloud (for existing deployments)
+
+If you need to fix a live deployment without running terraform apply, you can
+update the authz policy via the REST API. The safest path is terraform apply
+after updating the http_rules block.
+
+---
+
+## 6. Host Registration in Agent Registry
+
+The Agent Registry (Vertex AI control plane) must have `aiplatform.googleapis.com`
+registered as an allowed egress host. In Terraform, this is already covered by
+the foundation's `allowed_egress_hosts` list in `terraform.tfvars`:
+
+```hcl
+allowed_egress_hosts = [
+  ...
+  "aiplatform.googleapis.com"   # required for global endpoint (Gemini 3.x)
+]
+```
+
+The host is registered in the Agent Registry AND added to the SWP egress
+routing rules by the Terraform foundation. No additional changes needed for
+SWP-level routing — only the MA authz policy needs the fix above.
+
+---
+
+## 7. Model Selection Guide
+
+| Task | Model | Endpoint |
+|---|---|---|
+| Standard chat, coding assistant | `gemini-2.5-flash` | regional |
+| Heavy reasoning, long context analysis | `gemini-2.5-pro` | regional |
+| Latest generation, fastest 3.x | `gemini-3.5-flash` | **global** |
+| Deep reasoning, complex architecture | `gemini-3.1-pro-preview` | **global** |
+| Lightweight 3.x tasks | `gemini-3.1-flash-lite` | **global** |
+
+---
+
+## 8. `GCP_REGION` — The Critical Second Env Var
+
+When using `GOOGLE_CLOUD_LOCATION=global` in an RE deployment, ALL API calls
+that use `GOOGLE_CLOUD_LOCATION` for the region would use `global` — including
+session management and RE control-plane calls that don't accept `global`.
+
+The fix is `GCP_REGION` — a separate env var that `GatewayAgent` uses for
+non-model API calls:
+
+```bash
+# Container .env written by deploy_global_agent.sh:
+GOOGLE_CLOUD_LOCATION=global   # model inference → aiplatform.googleapis.com
+GCP_REGION=us-east1            # sessions, RE API, OTEL → us-east1-aiplatform...
+```
+
+The `deploy_global_agent.sh` script uses `GCP_REGION` (not
+`GOOGLE_CLOUD_LOCATION`) for all RE control-plane calls (cleanup, contextSpec
+PATCH, state polling, verification).
+
+---
+
+## 9. Checking Regional Model Availability
+
+When a Gemini 3.x model becomes available at a regional endpoint, revert:
+
+```bash
+# Check if gemini-3.5-flash is now available regionally
+curl -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "https://us-east1-aiplatform.googleapis.com/v1/publishers/google/models" \
+  | python3 -c "import json,sys; [print(m['name']) for m in json.load(sys.stdin).get('publisherModels',[]) if 'gemini-3' in m.get('name','')]"
+```
+
+If available, switch the `.env` back to `GOOGLE_CLOUD_LOCATION=us-east1` (or
+use `deploy_chat_agent.sh`). The MA egress `exact` match can then be restored.
+
+---
+
+## 10. Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `500` empty message, global-endpoint agent | MA egress `exact` match blocks global requests | Remove `hosts { exact = "aiplatform.googleapis.com" }` from MA egress http_rules |
+| `404 Model not found` on regional endpoint | Model only on global endpoint | Set `GOOGLE_CLOUD_LOCATION=global` in container .env OR use `api_client` override (Cloud Run only) |
+| `authzPolicyInfo.result: DENIED` in gateway logs | MA PERMISSION_DENIED on global endpoint | Same as above — remove exact match |
+| Session management fails with `global` region | `GOOGLE_CLOUD_LOCATION=global` used for session API | Add `GCP_REGION=us-east1` as separate env var; deploy script must use it for RE API calls |
+| `403 PERMISSION_DENIED` on global endpoint | SA missing `roles/aiplatform.user` | Grant to RE SA |
+| Quota exhausted on global endpoint | Separate quota pool from regional | Request quota increase for `aiplatform.googleapis.com` globally |
+| `invalid argument: location` | Wrong location string | Use exactly `"global"` (not `"us"`, `"worldwide"`) |
