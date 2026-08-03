@@ -101,10 +101,7 @@ output "egress_sgp_policy_id" {
   description = "The ID of the SGP CONTENT_AUTHZ policy on the egress gateway."
 }
 
-output "egress_iap_policy_id" {
-  value       = google_network_security_authz_policy.egress_iap_policy.id
-  description = "The ID of the IAP REQUEST_AUTHZ policy on the egress gateway (validates agent service identity)."
-}
+
 
 # --- Agent Registry ---
 output "registered_egress_endpoints" {
