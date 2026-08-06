@@ -574,6 +574,72 @@ The `query` field you see in `_AGENT_ENGINE_CLASS_METHODS` belongs to
 
 ---
 
+## Step 9 — Post-Deploy IAM Grants (Agent Identity SA)
+
+> [!IMPORTANT]
+> These 5 roles must be granted to **every** deployed Reasoning Engine's **Agent Identity SA**.
+> The deploy scripts (`deploy_chat_agent.sh`, `deploy_global_agent.sh`) call
+> `scripts/grant_agent_iam_roles.sh` automatically after each deployment — this step
+> is only needed if deploying manually or troubleshooting a pre-existing RE.
+
+### The 5 Required Roles
+
+| Display Name | Role ID | Why |
+|---|---|---|
+| Agent Platform User | `roles/aiplatform.user` | Call Vertex AI APIs: model inference, session management, Agent Registry reads |
+| Cloud Trace Agent | `roles/cloudtrace.agent` | Write distributed traces to Cloud Trace for LLM call observability |
+| Logs Writer | `roles/logging.logWriter` | Write structured logs (including `llm_usage` telemetry events) to Cloud Logging |
+| Reasoning Engine Session User | `roles/aiplatform.sessionUser` | Create, read, and append to RE sessions for multi-turn conversations |
+| Service Usage Consumer | `roles/serviceusage.serviceUsageConsumer` | Consume enabled GCP APIs without quota/billing errors |
+
+### Which Principal Gets These Roles
+
+Grant to the **Agent Identity SA** — NOT the Vertex AI platform SA (`gcp-sa-aiplatform-re`).
+
+```bash
+# Find the Agent Identity SA for a deployed RE
+gcloud ai reasoning-engines describe RE_ID \
+  --project=YOUR_PROJECT_ID \
+  --location=YOUR_REGION \
+  --format="yaml(spec.identityType, spec.serviceAccount)"
+
+# Expected output:
+# spec:
+#   identityType: AGENT_IDENTITY
+#   serviceAccount: agent-RE_ID@YOUR_PROJECT_ID.iam.gserviceaccount.com
+```
+
+### Manual Grant Commands
+
+```bash
+PROJECT_ID="your-project-id"
+AGENT_SA="agent-RE_ID@YOUR_PROJECT_ID.iam.gserviceaccount.com"
+
+for ROLE in \
+  roles/aiplatform.user \
+  roles/cloudtrace.agent \
+  roles/logging.logWriter \
+  roles/aiplatform.sessionUser \
+  roles/serviceusage.serviceUsageConsumer; do
+  echo "Granting $ROLE..."
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:${AGENT_SA}" \
+    --role="$ROLE" \
+    --condition=None \
+    --quiet
+done
+```
+
+### Automated (deploy scripts call this automatically)
+
+The shared helper `scripts/grant_agent_iam_roles.sh` is sourced and called by both
+deploy scripts after the RE reaches ACTIVE state. It:
+1. Fetches the Agent Identity SA from the RE spec via API (fallback: derives by convention)
+2. Grants all 5 roles idempotently (`|| true` — re-deploying is safe)
+3. Prints ✅/⚠️ per role so failures are visible without blocking deploy
+
+---
+
 ## Architecture Reference
 
 ```
@@ -732,3 +798,26 @@ These are two different env vars that look similar but control different things:
 
 Both are needed. Layer 1 fix (mTLS SSL crash) needs `GOOGLE_API_USE_MTLS_ENDPOINT=never`.
 Layer 3 fix (aiohttp singleton) needs `GOOGLE_API_USE_CLIENT_CERTIFICATE=false`.
+
+### 11. Agent Identity SA vs Platform SA — `iap.egressor` and IAM grants
+
+**WRONG:** Granting IAM roles to `service-PROJECT_NUMBER@gcp-sa-aiplatform-re.iam.gserviceaccount.com`
+
+**CORRECT:** Grant to `agent-RE_ID@PROJECT_ID.iam.gserviceaccount.com` (Agent Identity SA)
+
+The gateway patch injects `identityType: AGENT_IDENTITY` into every RE CREATE call,
+which causes Agent Gateway to provision a dedicated SA per RE. This SA:
+- Appears as the principal on IAP egress audit logs (`AuthorizeUser` events)
+- Is the correct target for `roles/iap.egressor` grants when promoting egress to ENFORCED mode
+- Is the correct target for the 5 required IAM roles (aiplatform.user, cloudtrace.agent, etc.)
+
+`gcp-sa-aiplatform-re` is the Vertex AI **platform** SA — it manages RE lifecycle
+(deploy, scale, GCS access). It is NOT the identity that appears on egress calls.
+
+Also: IAP ENFORCED mode on egress requires:
+1. Both gateways have `registries = ["//agentregistry.googleapis.com/..."]` wired
+2. All egress hosts registered as Agent Registry services
+3. Agent Identity SA granted `roles/iap.egressor` at the registry or endpoint level
+4. Without all three, IAP sees `resource: unregisteredEndpoint` + `principal=(empty)` → DENY
+
+See `skills/agw-egress-iap-pitfall/SKILL.md` for the full DRY_RUN → ENFORCED promotion path.

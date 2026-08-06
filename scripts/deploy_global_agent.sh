@@ -370,6 +370,12 @@ if [ "$DEPLOY_EXIT" -ne 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Post-deploy: source shared IAM grant helper.
+# ---------------------------------------------------------------------------
+# shellcheck source=scripts/grant_agent_iam_roles.sh
+source "$(dirname "$0")/grant_agent_iam_roles.sh"
+
+# ---------------------------------------------------------------------------
 # Post-deploy: strip server-injected contextSpec.memoryBankConfig
 # Uses GCP_REGION for RE API calls (not "global")
 # ---------------------------------------------------------------------------
@@ -425,6 +431,12 @@ if [ -n "$NEW_RE_ID" ]; then
     echo "  ⚠️  RE did not reach ACTIVE in 300s — final state: $RE_STATE"
     echo "  ⚠️  Check Cloud Logging for startup errors."
   fi
+
+  # -------------------------------------------------------------------------
+  # Grant 5 required IAM roles to the Agent Identity SA.
+  # Runs unconditionally once RE ID is known — idempotent on re-deploy.
+  # -------------------------------------------------------------------------
+  grant_agent_iam_roles "$PROJECT_ID" "$REGION" "$NEW_RE_ID" "$PATCH_TOKEN"
 else
   echo "  ⚠️  Could not locate RE — contextSpec PATCH skipped."
 fi
