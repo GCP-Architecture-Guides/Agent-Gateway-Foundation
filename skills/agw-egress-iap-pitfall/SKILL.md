@@ -291,3 +291,94 @@ Expected results:
 4. **Cloud Logging is the single source of truth.** The `iap_web` logs with `AuthorizeUser` / `code=7` / empty `PRINCIPAL_EMAIL` gave the root cause in seconds — check there first.
 
 5. **The error message is deliberately misleading.** "The endpoint is either incorrect or unregistered" made us investigate the Agent Registry for hours. The actual cause was IAP identity validation.
+
+---
+
+## Related Issue: Agent Identity mTLS Cert Not Provisioned (P2 Bug)
+
+> [!CAUTION]
+> This is a **separate but related** issue. Even when you do everything right
+> (correct architecture, Agent Identity SA, `iap.egressor` grants), IAP ENFORCED
+> on egress may still block all traffic because the mTLS cert itself is invalid.
+
+### The Two Must-Have Sanity Checks
+
+Before debugging IAP egress issues, always run:
+
+```bash
+bash scripts/check_agent_health.sh [RE_ID]
+```
+
+This checks both:
+
+| Check | What it tests | Healthy value |
+|---|---|---|
+| **agentGatewayConfig ≠ {}** | Gateway patch fired — RE is registered with Agent Gateway | Populated JSON object |
+| **Cert timestamp ≠ 1970-01-01** | Google CA provisioned a real mTLS cert for this RE | `clientCertChainVerified=true`, expiry in the future |
+
+### Symptom
+
+All REs have `identityType: AGENT_IDENTITY` and `effectiveIdentity` populated, `iap.egressor` is granted, BUT every gateway log shows:
+
+```json
+{
+  "mtls": {
+    "clientCertChainVerified": "false",
+    "clientCertValidEndTime": "1970-01-01T00:00:00Z"
+  }
+}
+```
+
+The cert is a placeholder — Google's internal CA did not issue a real cert. IAP cannot extract any principal from it. Result: `principal=(empty)` → `code=7` → DENIED.
+
+### Diagnosis
+
+```bash
+# Quick check — look at gateway logs for this RE's cert
+gcloud logging read \
+  "resource.type=\"networkservices.googleapis.com/Gateway\" AND jsonPayload.mtls.clientCertPresent=\"true\"" \
+  --project=PROJECT --limit=5 --format=json | \
+  python3 -c "
+import json,sys
+for e in json.load(sys.stdin):
+    m=e.get('jsonPayload',{}).get('mtls',{})
+    print('chainVerified:', m.get('clientCertChainVerified'), '| expiry:', m.get('clientCertValidEndTime'))
+"
+```
+
+**Healthy output:** `chainVerified: true | expiry: 2026-09-01T...`
+**Broken output:** `chainVerified: false | expiry: 1970-01-01T00:00:00Z`
+
+### Workaround
+
+Keep IAP in `DRY_RUN` mode until cert provisioning is resolved:
+
+```bash
+cat > /tmp/iap-dryrun.yaml << EOF
+name: PREFIX-iap-extension-egress
+service: iap.googleapis.com
+failOpen: true
+timeout: 1s
+metadata:
+  iapPolicyVersion: "V1"
+  iamEnforcementMode: "DRY_RUN"
+EOF
+gcloud beta service-extensions authz-extensions import PREFIX-iap-extension-egress \
+  --source=/tmp/iap-dryrun.yaml --location=REGION --project=PROJECT
+```
+
+This allows all egress while logging identity audit entries. See KNOWN_ISSUES.md #013 for full write-up, affected REs, and support questions filed.
+
+### Why the Grants Don't Help
+
+The grants are correct and will work once the cert is valid. The problem is authentication (no valid cert), not authorization (missing role):
+
+```
+✅ identityType: AGENT_IDENTITY set
+✅ effectiveIdentity: populated
+✅ iap.egressor: granted (principal:// + principalSet://)
+❌ mTLS cert: placeholder (chainVerified=false, expiry=epoch)
+   → gateway cannot derive principal from invalid cert
+   → IAP sees principal=(empty)
+   → DENY regardless of grants
+```

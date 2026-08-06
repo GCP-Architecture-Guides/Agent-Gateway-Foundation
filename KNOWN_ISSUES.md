@@ -25,6 +25,7 @@ ones that failed), the final resolution, and a rollback procedure.
 | 010 | `roles/modelarmor.inspector` does not exist — cannot grant gateway SA MA access via IAM | 🟡 Medium | ✅ Documented (not needed) |
 | 011 | Agent Gateway API hard limit: at most 1 `CONTENT_AUTHZ` policy per `CLIENT_TO_AGENT` ingress gateway | 🟡 Medium | ✅ Documented (platform limit) |
 | 012 | IAP egress: `fail_open=false + ENFORCED` blocks all RE outbound traffic | 🔴 Critical | ✅ Fixed — DRY_RUN deployed |
+| 013 | Agent Identity mTLS certs invalid (epoch timestamp) — IAP ENFORCED non-functional | 🟠 High | 🔴 Open — platform bug |
 
 ---
 
@@ -892,4 +893,138 @@ gcloud beta service-extensions authz-extensions import ${PREFIX}-iap-extension-e
 ```
 
 Then `terraform apply` to reconcile state.
+
+---
+
+## Issue #013 — Agent Identity mTLS Certs Invalid (Epoch Timestamp) — IAP ENFORCED Non-Functional
+
+**Status:** 🔴 Open — platform bug (P2 High), filed with Google Support  
+**Severity:** P2 High — IAP identity enforcement on egress is non-functional  
+**Project:** `charter-poc-test` (185602934768)  
+**Discovered:** 2026-08-04  
+
+### The Two Must-Have Sanity Checks
+
+Before debugging anything else, always verify:
+
+```bash
+# Check 1: agentGatewayConfig ≠ {} (gateway patch fired)
+gcloud ai reasoning-engines describe RE_ID \
+  --project=PROJECT --location=REGION \
+  --format="json(spec.agentGatewayConfig)"
+# Expected: populated JSON, not {}
+
+# Check 2: mTLS cert timestamp ≠ 1970-01-01 (cert provisioned)
+gcloud logging read \
+  'resource.type="networkservices.googleapis.com/Gateway" jsonPayload.mtls.clientCertPresent="true"' \
+  --project=PROJECT --limit=3 --format=json | \
+  python3 -c "import json,sys; [print(e['jsonPayload']['mtls']) for e in json.load(sys.stdin)]"
+# Expected: clientCertChainVerified=true, clientCertValidEndTime ≠ 1970-01-01
+```
+
+Or just run: `bash scripts/check_agent_health.sh [RE_ID]`
+
+### Summary
+
+Reasoning Engines deployed with `spec.identityType = "AGENT_IDENTITY"` correctly
+populate `effectiveIdentity` in the RE spec, but the mTLS client certificates
+presented by RE containers on egress are invalid/placeholder:
+
+- `clientCertChainVerified: false` — not issued by Google's internal CA
+- `clientCertValidEndTime: 1970-01-01T00:00:00Z` — epoch = null/placeholder cert
+
+Because the cert is invalid, the Agent Gateway egress proxy cannot derive a
+principal from the mTLS subject. IAP's `AuthorizeUser` sees `principal=(empty)`
+and returns `code=7` (PERMISSION_DENIED). Result: IAP ENFORCED on egress blocks
+100% of traffic even with correct `iap.egressor` grants.
+
+### Affected REs (charter-poc-test, 2026-08-04)
+
+| Display Name | RE ID | identityType | effectiveIdentity | Cert Valid? |
+|---|---|---|---|---|
+| ran-insights | 3683469506165866496 | AGENT_IDENTITY | ✅ populated | ❌ epoch |
+| ran-usecase | 552060390259818496 | AGENT_IDENTITY | ✅ populated | ❌ epoch |
+| ran-anomaly | 5588492148543586304 | AGENT_IDENTITY | ✅ populated | ❌ epoch |
+| ran-security | 4315099353904578560 | AGENT_IDENTITY | ✅ populated | ❌ epoch |
+| ran-orchestrator | 8650939895155523584 | AGENT_IDENTITY | ✅ populated | ❌ epoch |
+
+100% of cert fingerprints across all replicas = `chainVerified=false`, `expiry=1970-01-01`.
+
+### What the Gateway Log Shows
+
+```json
+{
+  "mtls": {
+    "clientCertPresent": "true",
+    "clientCertChainVerified": "false",
+    "clientCertValidEndTime": "1970-01-01T00:00:00Z",
+    "clientCertSha256Fingerprint": "c3EYbFlvEHpFrpIrJjDqVAao237cOTebYnEk/sJXljo"
+  },
+  "authzPolicyInfo": { "result": "DENIED" },
+  "httpRequest": { "status": 403 }
+}
+```
+
+### What's Correct vs Broken
+
+| Step | Status |
+|---|---|
+| RE deployed with `identityType: AGENT_IDENTITY` | ✅ |
+| `effectiveIdentity` populated (WIF principal path) | ✅ |
+| `iap.egressor` granted (principal:// and principalSet://) | ✅ |
+| Google CA issues valid mTLS cert to RE container | ❌ — cert is placeholder/null |
+| Gateway derives principal from mTLS subject | ❌ — invalid cert, no subject |
+| IAP sees non-empty principal | ❌ — `principal=(empty)` |
+| IAP ENFORCED allows egress | ❌ — `code=7 PERMISSION_DENIED` |
+
+### Workaround (Current)
+
+Keep IAP in `DRY_RUN` mode (`iamEnforcementMode: DRY_RUN`, `failOpen: true`).
+All egress traffic passes. IAP logs audit entries but never blocks.
+
+### Attempted Fixes (Did Not Help)
+
+- PATCH RE with `updateMask=spec.identityType` — does not re-trigger cert provisioning
+- Waited 7-9 hours after deploy — cert never became valid
+- Granted `iap.egressor` via both `principal://` and `principalSet://*` — ineffective without valid cert
+- Set both `principal://` and SA-level grants — no change
+
+### Reproduce
+
+```bash
+# 1. Deploy any RE with AGENT_IDENTITY (foundation does this by default via gateway patch)
+# 2. Run the health check
+bash scripts/check_agent_health.sh RE_ID
+# Check 2 will show: INVALID|chainVerified=false|expiry=1970-01-01
+
+# 3. Confirm via gateway logs directly
+gcloud logging read \
+  'resource.type="networkservices.googleapis.com/Gateway" AND jsonPayload.mtls.clientCertPresent="true"' \
+  --project=charter-poc-test --limit=5 --format=json
+```
+
+### Questions for Google Support
+
+1. Why are mTLS certs invalid? `identityType=AGENT_IDENTITY` is set, `effectiveIdentity` is populated.
+2. Is cert provisioning async? Do REs need to be running/active for the cert to be issued?
+3. Does PATCH trigger re-provisioning, or does the RE need to be deleted and redeployed?
+4. Is IAP ENFORCED on egress (with Agent Identity mTLS) GA-supported or still preview?
+5. Is there a prerequisite API, org policy, or CA pool configuration required?
+
+### Rollback
+
+```bash
+# Ensure IAP is in DRY_RUN (safe mode) — one command
+cat > /tmp/iap-dryrun.yaml << EOF
+name: PREFIX-iap-extension-egress
+service: iap.googleapis.com
+failOpen: true
+timeout: 1s
+metadata:
+  iapPolicyVersion: "V1"
+  iamEnforcementMode: "DRY_RUN"
+EOF
+gcloud beta service-extensions authz-extensions import PREFIX-iap-extension-egress \
+  --source=/tmp/iap-dryrun.yaml --location=REGION --project=PROJECT
+```
 
