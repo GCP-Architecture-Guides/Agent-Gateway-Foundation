@@ -82,6 +82,46 @@ resource "google_compute_firewall" "psc_ingress_allow" {
   depends_on = [google_project_service.compute]
 }
 
+# ==============================================================================
+# PSC Egress VIP — Allow traffic to 240.0.0.0/4 (Class E, GCP PSC gateway VIPs)
+# ==============================================================================
+# GCP uses the Class E address range (240.0.0.0/4) for PSC egress gateway VIPs.
+# When an RE container makes an outbound HTTP call, the PSC network attachment
+# intercepts it and redirects the packet to the egress gateway's VIP — typically
+# 240.0.0.2. Without an explicit VPC egress firewall rule allowing this range,
+# the GCP implicit deny-all egress rule drops the packet before it ever reaches
+# the gateway, causing silent connection failures that look identical to
+# "host not in egress allowlist" errors but are actually firewall drops.
+#
+# Symptom: agents work locally but ALL egress calls fail after deployment,
+# even for hosts that are correctly registered in allowed_egress_hosts.
+# Cloud Logging shows no gateway logs — the packet never reaches the SWP.
+#
+# This rule is always enabled (not gated by a variable) because:
+#   1. It is required for the PSC egress to function at all
+#   2. 240.0.0.0/4 is not routable on the public internet — it can only resolve
+#      to internal GCP PSC VIPs, so there is no security risk in allowing it
+#   3. Not having it is a guaranteed post-deployment headache on every new project
+# ==============================================================================
+resource "google_compute_firewall" "psc_egress_vip_allow" {
+  name    = "${var.prefix}-psc-egress-vip-allow"
+  network = google_compute_network.vpc.name
+  project = var.project_id
+
+  description = "Allow egress to 240.0.0.0/4 (GCP PSC gateway Class E VIP range, e.g. 240.0.0.2). Required for PSC egress interception to reach the Agent Gateway SWP."
+  direction   = "EGRESS"
+  priority    = 900
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443", "80"]
+  }
+
+  destination_ranges = ["240.0.0.0/4"]
+
+  depends_on = [google_project_service.compute]
+}
+
 # Agent Gateway - Ingress
 resource "google_network_services_agent_gateway" "ingress_gateway" {
   provider = google-beta
