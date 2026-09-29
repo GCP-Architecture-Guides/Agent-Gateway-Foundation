@@ -300,9 +300,13 @@ echo "Applying ADK monkey-patch for org policy bypass..."
 
 # ---------------------------------------------------------------------------
 # COMPLIANCE CHECK: agent.py must import GatewayAgent
+# Set SKIP_GATEWAY_CHECK=1 to bypass (required for plain Agent / google-adk(a2a) pattern)
 # ---------------------------------------------------------------------------
-echo "Running GatewayAgent compliance check..."
-if ! .venv/bin/python - <<'PYEOF'
+if [[ "${SKIP_GATEWAY_CHECK:-0}" == "1" ]]; then
+  echo "  ⚠️  SKIP_GATEWAY_CHECK=1 — bypassing GatewayAgent compliance check (plain Agent deploy)."
+else
+  echo "Running GatewayAgent compliance check..."
+  if ! .venv/bin/python - <<'PYEOF'
 import ast, os, sys
 _agent_src = os.environ.get("AGENT_SOURCE_DIR", "agents/global-agent")
 try:
@@ -322,12 +326,14 @@ if not uses_gateway:
     sys.exit(1)
 print("  ✅ Compliance check passed — GatewayAgent SDK detected.")
 PYEOF
-then
-    exit 1
+  then
+      exit 1
+  fi
 fi
 
 # ---------------------------------------------------------------------------
 # SDK BUNDLE: Copy lib/gateway_agent/ into agent directory
+# Skipped when SKIP_GATEWAY_CHECK=1 (plain Agent / google-adk(a2a) pattern)
 # ---------------------------------------------------------------------------
 SDK_SRC="lib/gateway_agent"
 SDK_DST="$AGENT_SOURCE_DIR/gateway_agent"
@@ -335,13 +341,17 @@ SDK_DST="$AGENT_SOURCE_DIR/gateway_agent"
 echo "Applying contextSpec injection patch..."
 .venv/bin/python scripts/patch_add_context_spec.py --venv .venv
 
-if [[ -d "$SDK_SRC" ]]; then
-    echo "Bundling GatewayAgent SDK into $AGENT_SOURCE_DIR/ for deployment..."
-    cp -r "$SDK_SRC" "$SDK_DST"
-    echo "  ✅ Copied lib/gateway_agent → $AGENT_SOURCE_DIR/gateway_agent"
+if [[ "${SKIP_GATEWAY_CHECK:-0}" != "1" ]]; then
+  if [[ -d "$SDK_SRC" ]]; then
+      echo "Bundling GatewayAgent SDK into $AGENT_SOURCE_DIR/ for deployment..."
+      cp -r "$SDK_SRC" "$SDK_DST"
+      echo "  ✅ Copied lib/gateway_agent → $AGENT_SOURCE_DIR/gateway_agent"
+  else
+      echo "  ❌ SDK source not found at $SDK_SRC — cannot bundle GatewayAgent"
+      exit 1
+  fi
 else
-    echo "  ❌ SDK source not found at $SDK_SRC — cannot bundle GatewayAgent"
-    exit 1
+  echo "  ⚠️  SKIP_GATEWAY_CHECK=1 — skipping GatewayAgent SDK bundle (plain Agent deploy)."
 fi
 
 echo "Deploying ADK Agent (global endpoint)..."

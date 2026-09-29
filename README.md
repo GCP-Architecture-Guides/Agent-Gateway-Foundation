@@ -17,30 +17,63 @@ limitations under the License. -->
 > ⚠️ **Disclaimer:** This code is for PoC environment only.
 > This demo code is not built for production workload.
 
-> Production-tested infrastructure-as-code for deploying AI agents secured by
-> Google Cloud **Agent Gateway** — PSC routing, Model Armor, org policies,
-> SGP semantic guardrails, and OTEL observability. Battle-hardened over 6 weeks
-> in a fully org-policy-enforced GCP environment.
+> Production-hardened infrastructure-as-code for deploying AI agents — single or
+> multi-agent — secured by Google Cloud **Agent Gateway**: PSC routing, Model Armor,
+> DLP, IAP, SGP semantic guardrails, org policies, and OTEL observability. Battle-tested
+> over 6+ weeks in a fully org-policy-enforced GCP environment.
 
-**Version:** `1.0.1` · **Region tested:** `us-east1` · **ADK:** `1.31.1`
+**Version:** `1.0.2` · **Region tested:** `us-east1` · **ADK:** `2.5.0` · **aiplatform:** `1.162.0`
 
 ---
 
-
 ## What You Get
 
-Every agent deployed through this foundation gets:
+Every agent deployed through this foundation automatically receives:
 
 | Layer | What it does |
 |---|---|
-| **PSC egress** | All outbound traffic routed through the gateway — unlisted hosts are blocked |
-| **Model Armor** | Dual templates: `security-high` screens user input, `security-responses` screens model output |
-| **3 Org Policies** | `AgentGatewayConfig`, `AgentIdentity`, `OtelConfig` enforced at project level |
-| **SGP NLC engine** | Semantic topic guardrails — blocks off-topic or disallowed requests |
-| **IAP (optional)** | Centralized caller identity enforcement at the gateway (REQUEST_AUTHZ, global `iap.googleapis.com`) |
-| **Observability** | Token usage dashboard, latency alerts, log-based metrics — wired automatically |
-| **GatewayAgent SDK** | One import replaces all boilerplate in your `agent.py` |
-| **8 Antigravity Skills** | Your AI coding assistant knows exactly how to set up, maintain, and extend every layer (incl. A2A multi-agent) |
+| **Agent Gateway (Ingress)** | All inbound traffic screened — Model Armor + IAP identity validation before it reaches your agent |
+| **Agent Gateway (Egress)** | All outbound traffic (LLM calls, tool calls) routed through the gateway — unlisted hosts are blocked at the PSC routing level |
+| **PSC (Private Service Connect)** | Agents reach Vertex AI and other GCP APIs without traversing the public internet |
+| **Model Armor** | Dual extensions on ingress + egress: prompt injection, jailbreak, PII, malicious URL, RAI filters. Ingress fail-closed; egress fail-open |
+| **DLP Templates** | Inspect + deidentify templates wired into Model Armor: SSN, email, API keys, credentials, medical codes |
+| **IAP** | Ingress: fail-closed identity validation (caller must hold `roles/iap.egressor`). Egress: audit-only DRY_RUN mode |
+| **SGP (Semantic Governance)** | Per-agent NLC (Natural Language Constraint) policy — blocks off-topic or disallowed requests semantically, not just by keyword |
+| **3 Org Policies** | `AgentGatewayConfig`, `AgentIdentity`, `OtelConfig` enforced at project level — any RE deploy without gateway config is rejected |
+| **Observability** | Token usage dashboards, gateway security dashboards, org-level rollup, BigQuery audit sink, 6 token alert policies |
+| **GatewayAgent SDK** | One import in `agent.py` handles all compliance boilerplate — OTEL telemetry, PSC-compatible endpoint routing, global Gemini 3.x support |
+| **Antigravity Skills** | Your AI coding assistant knows exactly how to set up, maintain, debug, and extend every layer — including A2A multi-agent |
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        Agent Gateway Foundation                              │
+│                                                                              │
+│  User / Client                                                               │
+│       │                                                                      │
+│       ▼                                                                      │
+│  ┌─────────────────────┐                                                     │
+│  │   Ingress Gateway   │  ← IAP (fail-closed) + Model Armor (fail-closed)   │
+│  └─────────┬───────────┘                                                     │
+│            │ authorized request                                              │
+│            ▼                                                                 │
+│  ┌─────────────────────┐                                                     │
+│  │  Reasoning Engine   │  ← Your agent (AdkApp + GatewayAgent SDK)          │
+│  │  (Vertex AI RE)     │    WIF identity · org policies enforced at deploy   │
+│  └─────────┬───────────┘                                                     │
+│            │ outbound (LLM / tools)                                          │
+│            ▼                                                                 │
+│  ┌─────────────────────┐                                                     │
+│  │   Egress Gateway    │  ← Model Armor (fail-open) + SGP + IAP DRY_RUN     │
+│  └─────────┬───────────┘                                                     │
+│            │ PSC route (allowlisted hosts only)                              │
+│            ▼                                                                 │
+│  aiplatform.googleapis.com  ·  your-api.example.com  ·  (others allowlisted)│
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -54,10 +87,9 @@ Your agent code goes in `agents/my-agent/`.
 Add this as a **git submodule** inside your existing repo.
 Your agent code stays where it is. Use `--agent-path` to point the deploy script at it.
 
-### Path C — Gitignored Subfolder (existing repo, no submodule complexity) ← simplest
-One-time `git clone` of the foundation into a `foundation/` subfolder of your
-team repo. Gitignore it. From then on everything is local — no more git,
-no scripts. Relative paths work. Antigravity sees everything in one workspace.
+### Path C — Gitignored Subfolder (no submodule complexity) ← simplest
+One-time `git clone` into a `foundation/` subfolder of your team repo. Gitignore it.
+Everything stays local — no ongoing git relationship with the foundation.
 
 ---
 
@@ -67,7 +99,7 @@ no scripts. Relative paths work. Antigravity sees everything in one workspace.
 |---|---|
 | `terraform` | ≥ 1.5 · [Install](https://developer.hashicorp.com/terraform/install) |
 | `gcloud` CLI | latest · [Install](https://cloud.google.com/sdk/docs/install) |
-| `python3` | ≥ 3.10 |
+| `python3` | ≥ 3.11 |
 
 **GCP IAM requirements:**
 
@@ -79,27 +111,21 @@ no scripts. Relative paths work. Antigravity sees everything in one workspace.
 > [!CAUTION]
 > `roles/orgpolicy.policyAdmin` must be granted at the **GCP Organization level**,
 > not the project level. This is the #1 first-deploy failure. If your account
-> doesn't have it, ask your GCP org admin — or have the foundation owner run
-> `terraform apply -target=google_org_policy_custom_constraint.*` once with
-> elevated credentials.
+> doesn't have it, ask your GCP org admin.
 
-**Bootstrap (one-time on fresh projects):**
+**Authenticate before starting:**
+```bash
+gcloud auth application-default login
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+```
 
-`deploy_all.sh` handles this automatically. If you run `terraform apply` directly
-(Path B/C), enable these two APIs first — Terraform cannot call any GCP endpoint
-without Cloud Resource Manager, and cannot enable it itself from cold:
-
+**Bootstrap APIs (one-time, idempotent):**
 ```bash
 gcloud services enable \
   cloudresourcemanager.googleapis.com \
   agentregistry.googleapis.com \
   --project=YOUR_PROJECT_ID
-```
-
-**Authenticate:**
-```bash
-gcloud auth application-default login
-gcloud auth login
 ```
 
 ---
@@ -120,11 +146,10 @@ Edit `terraform.tfvars` — minimum required fields:
 
 ```hcl
 project_id      = "your-gcp-project-id"
-organization_id = "123456789012"          # gcloud organizations list
+organization_id = "123456789012"         # gcloud organizations list
 location        = "us-east1"
-prefix          = "myteam"               # short prefix, no spaces
-agent_name      = "my_agent"             # must be a Python identifier (underscores, not hyphens)
-agent_description = "What my agent does."
+prefix          = "myteam"              # short prefix, no spaces, no hyphens
+agent_name      = "my_agent"            # Python identifier: underscores only
 
 allowed_egress_hosts = [
   "api.example.com",   # every external host your agent needs to call
@@ -132,7 +157,7 @@ allowed_egress_hosts = [
 
 sgp_nlc_constraint = <<-EOT
   This agent helps with [YOUR TOPIC]. It may only answer questions about
-  [ALLOWED SCOPE]. Allowed code: Python, Terraform, Bash only.
+  [ALLOWED SCOPE].
 EOT
 ```
 
@@ -141,8 +166,8 @@ EOT
 ```
 agents/
 └── my-agent/
-    ├── agent.py          ← your agent logic (see template/ for a starter)
-    └── requirements.txt  ← must have pinned versions (google-adk==X.Y.Z)
+    ├── agent.py          ← your agent logic
+    └── requirements.txt  ← pinned versions required
 ```
 
 Use the `GatewayAgent` SDK — it handles all compliance automatically:
@@ -154,41 +179,13 @@ from gateway_agent import GatewayAgent
 
 root_agent = GatewayAgent(
     name="my_agent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash",          # regional endpoint
+    # model="gemini-3.5-flash",        # global endpoint — use GlobalGemini wrapper
     description="My agent.",
     instruction="You are a helpful assistant.",
     tools=[],
 )
 ```
-
-#### Example Agents (built-in)
-
-Two reference agents ship with the foundation — one per deployment pattern:
-
-| Agent | Model | Endpoint | Deploy Script | When to use |
-|---|---|---|---|---|
-| `agents/chat-agent/` | `gemini-2.5-flash` | `us-east1-aiplatform.googleapis.com` | `deploy_chat_agent.sh` | Standard workloads, data-residency requirements |
-| `agents/global-agent/` | `gemini-3.5-flash` | `aiplatform.googleapis.com` (global) | `deploy_global_agent.sh` | Gemini 3.x models, latest capabilities |
-
-**Regional pattern** (`chat-agent`) — `GOOGLE_CLOUD_LOCATION=us-east1`:
-```bash
-bash scripts/deploy_chat_agent.sh
-# Uses: us-east1-aiplatform.googleapis.com
-# Model: gemini-2.5-flash (available at regional endpoint)
-```
-
-**Global pattern** (`global-agent`) — `GOOGLE_CLOUD_LOCATION=global`:
-```bash
-bash scripts/deploy_global_agent.sh
-# Uses: aiplatform.googleapis.com (global Vertex AI frontend)
-# Model: gemini-3.5-flash (Gemini 3.x, global endpoint only)
-# GCP_REGION is set separately for session/RE control-plane calls
-```
-
-> **Note:** The model endpoint is set entirely by the `GOOGLE_CLOUD_LOCATION`
-> env var injected at deploy time — no code changes needed to switch patterns.
-> See `lib/gateway_agent/global_gemini.py` for the full explanation.
-
 
 ### 3. Deploy
 
@@ -196,25 +193,13 @@ bash scripts/deploy_global_agent.sh
 bash deploy_all.sh
 ```
 
-**Selective phase runs — `--phases` flag:**
+**What happens:**
 
-```bash
-bash deploy_all.sh                   # all phases (default)
-bash deploy_all.sh --phases infra    # terraform only (infra first, agent later)
-bash deploy_all.sh --phases agent    # redeploy agent only (infra already done)
-bash deploy_all.sh --phases sgp      # recreate SGP policy only
-bash deploy_all.sh --phases test     # rerun guardrail tests only
-```
-
-**Phases, ~20 minutes total for `all`:**
-
-| Phase | What runs | Duration |
-|---|---|---|
-| 0 — Bootstrap | `gcloud services enable` — prerequisite APIs (idempotent) | ~5s |
-| 1 — Infra | `terraform apply` — VPC, PSC, Model Armor, org policies, dashboard | ~10 min |
-| 2 — Agent | `deploy_chat_agent.sh` — packages and deploys to Vertex AI RE | ~8 min |
-| 3 — SGP | `create_sgp_policy.sh` — registers NLC topic constraint | ~1 min |
-| 4 — Tests | `run_guardrail_tests.py` — 8 guardrail tests | ~2 min |
+| Phase | Script | Duration | What it does |
+|---|---|---|---|
+| **Infra** | `terraform apply` | ~10 min | VPC · PSC · Agent Gateways · Model Armor · IAP · SGP engine · DLP · Org Policies · BigQuery sink · Dashboards |
+| **Agent** | `deploy_chat_agent.sh` | ~5 min | Packages + deploys your agent to Vertex AI RE · strips contextSpec · grants 7 IAM roles to WIF identity |
+| **SGP** | `create_sgp_policy.sh` | ~1 min | Registers NLC topic constraint in Agent Registry |
 
 ### 4. Tear down
 
@@ -224,327 +209,345 @@ bash destroy_all.sh
 
 ---
 
-## Path B — Sidecar Setup (Existing Repo)
+## Multi-Agent A2A Mesh — Food Court Reference Implementation
 
-### 1. Add as git submodule
+This foundation ships with a **production-validated 4-agent A2A mesh** as a reference implementation. It demonstrates the complete pattern for building multi-agent systems where specialists are dynamically discovered — zero hardcoded RE IDs.
 
-```bash
-# From your existing repo root
-git submodule add https://github.com/GCP-Architecture-Guides/Agent-Gateway-Foundation.git foundation
-git commit -m "feat: add Agent-Gateway-Foundation as submodule"
+### Architecture
 
-# Pin to a release
-cd foundation && git checkout v1.0.1 && cd ..
-git add foundation && git commit -m "chore: pin foundation to v1.0.1"
+```
+User
+  │
+  ▼
+Ingress Gateway
+  │  IAP (identity check) + Model Armor (content scan)
+  ▼
+store_concierge (Orchestrator RE)
+  │
+  │  1. Classify user intent (LLM)
+  │  2. Call specialist tool: call_pizza_agent() / call_burger_agent() / call_sushi_agent()
+  │  3. Discover specialist RE via labels (AgentRegistry.find capability=X)
+  │  4. Forward query via REST SSE → specialist RE
+  │
+  ├─────────────────────────────────────────────────────────────┐
+  │                               │                             │
+  ▼                               ▼                             ▼
+pizza_specialist RE         burger_specialist RE          sushi_specialist RE
+  │                               │                             │
+  └───────────────────────────────┴─────────────────────────────┘
+                                  │
+                            Egress Gateway
+                     Model Armor + SGP + IAP DRY_RUN
+                                  │
+                            PSC → aiplatform.googleapis.com
+                            (gemini-3.5-flash, global endpoint)
 ```
 
-> [!CAUTION]
-> Use `git submodule add` — NOT `git clone`. A plain clone creates a nested
-> `.git` that your parent repo cannot track. The foundation will silently
-> be missing from your commits.
+**Key design properties:**
+- **Zero hardcoded specialist URLs or RE IDs** — all discovery is runtime via `labels.capability`
+- **Adding a specialist = deploy + label** → orchestrator auto-discovers, no redeployment
+- **google-adk(a2a) classification** — 24 classMethods (13 ADK + 11 A2A protocol) applied post-deploy
+- **agentCard** on every RE — enables A2A badge in Vertex AI console
+- **WIF identity (7 roles)** — every RE has its own Workload Identity Federation principal
 
-### 2. Add to your parent repo's .gitignore
+### Agent Structure
 
-```gitignore
-# Agent-Gateway-Foundation — never commit project-specific config
-foundation/terraform.tfvars
-foundation/*.tfvars
-!foundation/*.tfvars.example
-foundation/.terraform/
-foundation/*.tfstate*
-foundation/agents/*/.env
 ```
-
-### 3. Configure
-
-```bash
-cp foundation/terraform.tfvars.example foundation/terraform.tfvars
-```
-
-Add three anchor comments at the top so Antigravity knows your layout:
-
-```hcl
-# FOUNDATION_ROOT: foundation/
-# AGENT_PATH: src/my-agent
-# DEPLOY_TARGET: reasoning_engine
-
-project_id      = "your-gcp-project-id"
-organization_id = "123456789012"
-location        = "us-east1"
-prefix          = "myteam"
-agent_name      = "my_agent"
-agent_description = "What my agent does."
-# ... rest of fields same as Path A
-```
-
-### 4. Deploy infrastructure
-
-```bash
-terraform -chdir=foundation init
-terraform -chdir=foundation apply -auto-approve
-```
-
-### 5. Deploy your existing agent
-
-```bash
-# Your agent code stays where it is — pass its path to the deploy script
-bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/my-agent
-
-# The script will:
-# - Write ./src/my-agent/.env with gateway env vars (from terraform outputs)
-# - Bundle the GatewayAgent SDK into your agent dir temporarily
-# - Deploy to Vertex AI RE via adk deploy
-# - Clean up the bundle
-```
-
-> [!IMPORTANT]
-> Add `src/my-agent/.env` to your `.gitignore` — it contains live project
-> credentials and is regenerated on every deploy.
-
-### 6. Update the foundation
-
-```bash
-cd foundation && git checkout v1.1.0 && cd ..
-git add foundation && git commit -m "chore: bump foundation to v1.1.0"
-
-# Re-apply — only changed resources update
-terraform -chdir=foundation apply -auto-approve
+agents/
+├── orchestrator/           ← Store Concierge — routes to specialists
+│   ├── agent.py            ← GatewayAgent + call_X_agent() tools + AgentRegistry discovery
+│   └── requirements.txt
+├── pizza-agent/            ← Pizza Specialist
+│   ├── agent.py            ← GatewayAgent + pizza ordering tools
+│   └── requirements.txt
+├── burger-agent/           ← Burger Specialist
+│   ├── agent.py
+│   └── requirements.txt
+└── sushi-agent/            ← Sushi Specialist
+    ├── agent.py
+    └── requirements.txt
 ```
 
 ---
 
-## Path C — Gitignored Subfolder (No Submodule Complexity)
+## Deploy Workflow — `deploy_all.sh`
 
-**One git clone. Then everything is local.** No submodule, no scripts, no
-ongoing git relationship with the foundation.
+The main deploy script handles the full end-to-end flow for the A2A mesh.
+**`deploy_all.sh` is always the source of truth** — `destroy_all.sh` mirrors it exactly.
 
-```
-my-team-repo/                ← your repo (pushed to GitHub normally)
-  ├── src/
-  │   └── my-agent/          ← your agent code (tracked, pushed)
-  ├── .gitignore             ← includes "foundation/"
-  └── foundation/            ← one-time clone (gitignored, stays local)
-        └── terraform.tfvars ← gitignored, you fill this in once
-```
-
-### 1. One-time setup
+### Usage
 
 ```bash
-# From your team repo root:
-
-# Step 1 — gitignore the foundation folder
-echo "foundation/" >> .gitignore
-echo "src/my-agent/.env" >> .gitignore
-git add .gitignore && git commit -m "chore: gitignore AGW foundation"
-
-# Step 2 — clone the foundation once (not a submodule, just files)
-git clone https://github.com/GCP-Architecture-Guides/Agent-Gateway-Foundation.git foundation
-
-# Step 3 — create your config
-cp foundation/terraform.tfvars.example foundation/terraform.tfvars
-# Fill in foundation/terraform.tfvars — that's the only file you ever edit
+bash scripts/deploy_all.sh                    # default: classify + orchestrator + E2E + SGP
+bash scripts/deploy_all.sh --fresh           # full deploy from scratch (after destroy_all.sh)
+bash scripts/deploy_all.sh --skip-orchestrator  # classify + E2E + SGP only
+bash scripts/deploy_all.sh --skip-e2e           # skip E2E tests
+bash scripts/deploy_all.sh --skip-sgp           # skip SGP creation (re-deploy with existing SGPs)
+bash scripts/deploy_all.sh --e2e-only           # run E2E tests only (no deploy, no SGP)
 ```
+
+### Step-by-Step Flow
+
+#### STEP 0 — Deploy Specialists `[--fresh only]`
+
+```bash
+# Triggered only with --fresh flag (after a full destroy_all.sh teardown)
+# Deploys each specialist independently via deploy_a2a_agents.sh
+for specialist in pizza burger sushi; do
+  bash scripts/deploy_a2a_agents.sh --only "$specialist"
+done
+```
+
+**Per-specialist what happens (via `deploy_a2a_agent.py`):**
+
+1. Load `agent.py` + `requirements.txt` from `agents/<specialist>/`
+2. Bundle with `cloudpickle.register_pickle_by_value` (cloudpickle caveat #16)
+3. `AgentEngine.create()` — `_gateway_patch.pth` intercepts and injects:
+   - `agentGatewayConfig.clientToAgentConfig` → ingress gateway
+   - `agentGatewayConfig.agentToAnywhereConfig` → egress gateway
+   - `identityType: AGENT_IDENTITY` (org policy requirement)
+   - OTEL env vars (org policy requirement)
+4. GCS upload: `gs://{project}-staging/{display_name}/`
+5. **POST-DEPLOY PATCHes** (all via REST API, no redeploy):
+   - `contextSpec → {}` — prevents DNS crash from auto-injected `memoryBankConfig`
+   - `classMethods = 24` (13 ADK + 11 A2A) + `agentFramework = google-adk`
+   - `agentCard` — url, skills, capabilities (required for A2A badge in console)
+   - `labels`: `role=specialist`, `team=food-court`, `capability={pizza|burger|sushi}-specialist`
+6. **IAM grants** — 7 roles to WIF principal:
+   - `roles/aiplatform.user` · `roles/cloudtrace.agent` · `roles/logging.logWriter`
+   - `roles/aiplatform.sessionUser` · `roles/serviceusage.serviceUsageConsumer`
+   - `roles/iap.egressor` · `roles/datastore.user`
+
+**ETA: ~10–15 minutes total (3 specialists × ~4 min each)**
+
+---
+
+#### STEP 1 — Classify All Specialists as `google-adk(a2a)`
+
+```bash
+python scripts/patch_a2a_classification.py \
+  --project "$PROJECT_ID" --region "$REGION" --team food-court
+```
+
+- Discovers all REs with `labels.team=food-court`
+- Merges 24 classMethods (idempotent — won't duplicate)
+- Refreshes `agentCard` on each specialist
+
+This step runs even on a default (non-`--fresh`) deploy to ensure classification is current without redeploying the RE container.
+
+**ETA: < 30 seconds**
+
+---
+
+#### STEP 2 — Deploy `store_concierge` Orchestrator
+
+```bash
+python scripts/redeploy_orchestrator.py \
+  --project "$PROJECT_ID" --region "$REGION"
+```
+
+1. Record existing `store_concierge` REs (for blue/green cleanup post-deploy)
+2. `AgentEngine.create()` with `extra_packages=[lib/gateway_agent/]`
+   - `gateway_agent` package installed in the container at startup
+3. Delete old `store_concierge` RE(s) after new one is ACTIVE (blue/green swap)
+4. **POST-DEPLOY PATCHes:**
+   - `contextSpec → {}`
+   - `classMethods = 24` + `agentFramework = google-adk`
+   - `agentCard` — url, skills, capabilities
+   - `labels`: `role=orchestrator`, `team=food-court`, `capability=food-concierge`
+5. **IAM grants** — same 7 roles as specialists (org_id + project_num resolved dynamically via `gcloud`)
+6. **Re-run classification** — `patch_a2a_classification.py --team food-court`
+   (catches the newly deployed orchestrator in the same pass)
+
+**ETA: ~5 minutes**
+
+---
+
+#### STEP 3 — E2E Validation
+
+```bash
+python scripts/e2e_test.py --project "$PROJECT_ID" --region "$REGION"
+```
+
+Runs 17 queries across all 4 agents:
+
+| Agent | Queries | What's tested |
+|---|---|---|
+| `pizza_specialist` | 4 | Direct specialist queries |
+| `burger_specialist` | 4 | Direct specialist queries |
+| `sushi_specialist` | 4 | Direct specialist queries |
+| `store_concierge` | 5 | Orchestrator routing + direct answers |
+
+All queries go through the full gateway stack (ingress → RE → egress → Vertex AI).
+Pass = non-empty response for every query.
+
+**ETA: ~2 minutes**
+
+---
+
+#### STEP 4 — SGP NLC Policy Creation
+
+```bash
+# Waits 90s for Agent Registry auto-registration (RE must be ACTIVE first)
+sleep 90
+
+for agent in store_concierge pizza_specialist burger_specialist sushi_specialist; do
+  AGENT_NAME="$agent" bash scripts/create_sgp_policy.sh
+done
+```
+
+**Why 90s wait?** `AgentEngine.create()` returns when the RE reaches `ACTIVE` state. But Vertex AI auto-registers the RE in the **Agent Registry** asynchronously — typically 60–90 seconds after ACTIVE. `create_sgp_policy.sh` needs the Agent Registry entry to attach the NLC policy.
+
+**SGP is non-fatal** — agents function without it. It is the governance/content layer only. If SGP creation fails, the deploy script reports it as a warning with the retry command.
+
+**ETA: ~2 minutes (4 policies)**
+
+---
+
+### Deploy Flags Matrix
+
+| Flag | Step 0 (specialists) | Step 1 (classify) | Step 2 (orchestrator) | Step 3 (E2E) | Step 4 (SGP) |
+|---|---|---|---|---|---|
+| *(default)* | ❌ | ✅ | ✅ | ✅ | ✅ |
+| `--fresh` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `--skip-orchestrator` | ❌ | ✅ | ❌ | ✅ | ✅ |
+| `--skip-e2e` | ❌ | ✅ | ✅ | ❌ | ✅ |
+| `--skip-sgp` | ❌ | ✅ | ✅ | ✅ | ❌ |
+| `--e2e-only` | ❌ | ❌ | ❌ | ✅ | ❌ |
+
+> [!TIP]
+> **Most common re-deploy:** `bash scripts/deploy_all.sh` (no flags)
+> Reclassifies all specialists, redeploys orchestrator, runs E2E, recreates SGP.
+>
+> **After full teardown:** `bash scripts/deploy_all.sh --fresh`
+> Deploys everything from scratch.
+
+---
+
+## Destroy Workflow — `destroy_all.sh`
+
+Mirrors `deploy_all.sh` exactly — tears down every resource it creates.
+
+```bash
+bash destroy_all.sh          # interactive (prompts for confirmation)
+bash destroy_all.sh --force  # non-interactive (CI/CD)
+```
+
+**What gets deleted:**
+
+| Phase | Resources | How |
+|---|---|---|
+| **Phase 1 — SGP policies** | NLC policies for all 4 food-court agents | `gcloud beta ai semantic-governance-policies delete` |
+| **Phase 2 — Reasoning Engines** | All REs with `labels.team=food-court` (pizza, burger, sushi, store_concierge) | REST API delete with `?force=true` |
+| **Phase 3 — GCS staging** | `gs://{project}-staging/{agent_name}/` for all 4 agents | `gsutil -m rm -r` |
+| **Phase 4 — Local cleanup** | `__pycache__`, `*.pyc`, leftover `food_court_backend.py` | `find + rm` |
 
 > [!NOTE]
-> After the clone, `foundation/` is just a folder of files on your machine.
-> It is **not tracked** by your team repo. No `git push`, no `git pull`,
-> no submodule commands. It stays local.
-
-### 2. Configure terraform.tfvars
-
-Anchor comments use relative paths — works for every developer:
-
-```hcl
-# FOUNDATION_ROOT: foundation/
-# AGENT_PATH: src/my-agent
-# DEPLOY_TARGET: reasoning_engine
-
-project_id      = "your-gcp-project-id"
-organization_id = "123456789012"
-location        = "us-east1"
-prefix          = "myteam"
-agent_name      = "my_agent"
-agent_description = "What my agent does."
-# ... rest of fields same as Path A
-```
-
-### 3. Deploy infrastructure
-
-```bash
-terraform -chdir=foundation init
-terraform -chdir=foundation apply -auto-approve
-```
-
-### 4. Deploy your agent
-
-```bash
-bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/my-agent
-```
-
-### 5. Wire Antigravity skills (once per developer)
-
-```bash
-mkdir -p ~/.gemini/config/skills
-for d in foundation/skills/*/; do
-  ln -sf "$(pwd)/$d" ~/.gemini/config/skills/"$(basename $d)"
-done
-```
-
-### 6. When you need a newer foundation version
-
-Delete and re-clone. That's it:
-
-```bash
-rm -rf foundation
-git clone https://github.com/GCP-Architecture-Guides/Agent-Gateway-Foundation.git foundation
-cp foundation/terraform.tfvars.example foundation/terraform.tfvars
-# Re-fill in your values (or keep a backup of your old terraform.tfvars)
-terraform -chdir=foundation init
-terraform -chdir=foundation apply -auto-approve
-```
-
-### Onboarding a new developer
-
-They clone the team repo, then do the same one-time clone:
-
-```bash
-git clone https://github.com/my-team/my-agent-repo.git
-cd my-agent-repo
-git clone https://github.com/GCP-Architecture-Guides/Agent-Gateway-Foundation.git foundation
-cp foundation/terraform.tfvars.example foundation/terraform.tfvars
-# Fill in terraform.tfvars — done
-```
-
-### Deploying multiple agents to the same gateway
-
-The gateway infrastructure is deployed once and shared. Each additional agent
-just needs its own deploy — no `terraform apply` needed (unless it calls new
-external hosts not yet in `allowed_egress_hosts`).
-
-```
-my-team-repo/
-  ├── src/
-  │   ├── agent-1/   ← deployed as RE "agent_one"
-  │   ├── agent-2/   ← deploy as RE "agent_two"
-  │   └── agent-3/   ← deploy as RE "agent_three"
-  └── foundation/    ← one gateway, shared by all agents
-```
-
-Use `--agent-name` to deploy each agent with its own identity without
-editing `terraform.tfvars`:
-
-```bash
-# Agent 1 — name comes from terraform.tfvars (already deployed)
-bash foundation/scripts/deploy_chat_agent.sh --agent-path ./src/agent-1
-
-# Agent 2 — override name inline, no terraform.tfvars edit
-bash foundation/scripts/deploy_chat_agent.sh \
-  --agent-path ./src/agent-2 \
-  --agent-name agent_two \
-  --agent-description "What agent two does"
-
-# Agent 3
-bash foundation/scripts/deploy_chat_agent.sh \
-  --agent-path ./src/agent-3 \
-  --agent-name agent_three \
-  --agent-description "What agent three does"
-```
-
-Register a separate SGP policy per agent:
-
-```bash
-# For agent 1 (primary agent_name in terraform.tfvars):
-bash foundation/scripts/create_sgp_policy.sh
-
-# For agents 2, 3... (deployed with --agent-name):
-# create_sgp_policy.sh always reads agent_name from terraform.tfvars (agent 1 only).
-# Use the manual Step 4 from the agw-add-sgp-policy skill for additional agents.
-```
-
-> [!NOTE]
-> `agent_name` must be a valid Python identifier — underscores only, no hyphens.
-> The deploy script validates this and fails fast if the name is invalid.
-
-## Antigravity Skills Setup (AI Coding Assistant)
-
-The `skills/` directory contains SKILL.md files that teach Antigravity
-exactly how to set up and maintain every layer of this foundation.
-
-**One-time setup — run after cloning or adding the submodule:**
-
-```bash
-# Standalone (run from repo root)
-mkdir -p ~/.gemini/config/skills
-for d in skills/*/; do
-  ln -sf "$(pwd)/$d" ~/.gemini/config/skills/"$(basename $d)"
-done
-
-# Sidecar (run from parent repo root)
-mkdir -p ~/.gemini/config/skills
-for d in foundation/skills/*/; do
-  ln -sf "$(pwd)/$d" ~/.gemini/config/skills/"$(basename $d)"
-done
-
-echo "✅ $(ls skills/ 2>/dev/null || ls foundation/skills/) skills linked"
-```
-
-**What each skill does:**
-
-| Skill | When Antigravity reads it |
-|---|---|
-| `agw-foundation-adoption` | "Set up the gateway" / "Wire my agent to it" / "Deploy step by step" |
-| `agw-add-sgp-policy` | "Add an SGP policy" / "Register topic constraints for my agent" |
-| `gateway-agent-sdk` | "My agent has no telemetry" / "Add GatewayAgent to my agent" |
-| `sgp-network-authz-pattern` | "Set up the SGP policy engine" |
-| `sgp-policy-rules` | "Add/change what my agent is allowed to discuss" |
-| `agent-gateway-deploy-patch` | "RE deploy fails with code 13 / org policy error" |
-| `vertex-ai-global-endpoint-adk` | "My agent returns 404 for the model" |
-| `a2a-agent-deploy` | \"Deploy A2A specialist agents\" / \"A2A deploy fails\" / \"cloudpickle / pickle errors\" / \"No module named executor\" / \"a2a-sdk 1.1.2 errors\" |
-| `a2a-agent-runtime` | ⚠️ **DEPRECATED** — use `a2a-agent-deploy` instead |
+> `destroy_all.sh` does **NOT** run `terraform destroy` — infrastructure (gateways, VPC, Model Armor) stays up.
+> Terraform teardown is intentionally manual to prevent accidental infra destruction.
+> Run `terraform destroy` separately when you want to remove the full stack.
 
 ---
 
-## Optional — VPC Service Controls (VPC-SC)
+## Adding a New Specialist (Zero-Touch Discovery)
 
-If your project must live inside a VPC-SC perimeter, Agent Gateway provisioning
-requires 8 ingress rules to allow its control-plane service agents through the
-perimeter boundary. This is a **one-time manual step** before running `deploy_all.sh`.
+1. **Create the agent:**
+   ```
+   agents/my-specialist/
+   ├── agent.py          ← GatewayAgent + your specialist tools
+   └── requirements.txt  ← pinned deps
+   ```
 
-```
-1. Create VPC-SC perimeter + add your project  ← you do manually
-2. bash scripts/setup_vpc_sc_ingress.sh \
-     --policy-id YOUR_POLICY_ID \
-     --perimeter YOUR_PERIMETER_NAME           ← script handles all 8 rules
-3. Wait 5–15 min for VPC-SC propagation
-4. bash deploy_all.sh                          ← unchanged, works as normal
-```
+2. **Add deploy entry to `scripts/deploy_a2a_agents.sh`:**
+   ```bash
+   if [[ -z "$ONLY_AGENT" || "$ONLY_AGENT" == "my-specialist" ]]; then
+     deploy_agent "my-specialist" "my_specialist" \
+       "my-description" \
+       "my-capability" "specialist"
+   fi
+   ```
 
-Full root cause explanation, step-by-step setup, and troubleshooting:
-→ **[docs/VPC_SC.md](docs/VPC_SC.md)**
+3. **Deploy:**
+   ```bash
+   bash scripts/deploy_a2a_agents.sh --only my-specialist
+   ```
+
+4. **Done** — the orchestrator discovers it automatically via `AgentRegistry` labels.
+   No orchestrator redeployment needed.
+
+> [!TIP]
+> Optionally add a `call_my_specialist_agent()` tool to `agents/orchestrator/agent.py`
+> to improve LLM intent classification. Discovery works regardless.
 
 ---
 
-## Config Flow — Where Values Come From
+## Runtime Request Flow
 
+```
+User sends query
+    │
+    ▼
+Ingress Gateway (Agent Gateway)
+    ├── IAP Extension (fail-closed)
+    │     └── validates caller has roles/iap.egressor
+    └── Model Armor Extension (fail-closed, timeout=3s)
+          └── DLP scan · prompt injection · jailbreak · malicious URL · RAI
 
-Everything flows from one file. Nothing is hardcoded anywhere else.
+    │ authorized
+    ▼
+store_concierge RE (Vertex AI Reasoning Engine)
+    ├── Classifies intent via LLM (gemini-3.5-flash, global endpoint)
+    ├── Routes to specialist tool: call_pizza_agent() etc.
+    └── Specialist RE called via REST (direct PSC, bypasses gateway for cross-agent)
+
+Specialist RE (pizza / burger / sushi)
+    └── LLM call → Egress Gateway
+
+Egress Gateway (Agent Gateway)
+    ├── Model Armor Extension (fail-open, suffix match *.aiplatform.googleapis.com)
+    │     └── response DLP scan · RAI filter
+    ├── SGP Extension (fail-closed)
+    │     └── NLC semantic content check (ALLOW/DENY per agent policy)
+    └── IAP Extension (fail-open, DRY_RUN audit-only)
+
+    │ PSC route (allowlisted hosts only)
+    ▼
+aiplatform.googleapis.com (global endpoint)
+    └── gemini-3.5-flash / gemini-3.1-pro-preview
+
+    │ response
+    ▼
+User
+```
+
+**Observability side-channel:**
+- Cloud Trace ← OTEL token callback in `gateway_agent` (every LLM call)
+- BigQuery `llm_audit_logs` ← `aiplatform` data access + `networksecurity` authz logs
+- Cloud Monitoring ← 6 alert policies (token spike, runaway loop, zero traffic, etc.)
+
+---
+
+## Config Flow
+
+Everything flows from `terraform.tfvars`. Nothing is hardcoded anywhere else.
 
 ```
 terraform.tfvars
   │
   ├─▶ terraform apply
-  │     Creates: PSC, Model Armor, Org Policies, SGP engine, dashboard
+  │     Creates: VPC · PSC · Ingress/Egress Gateways · Model Armor · DLP
+  │              IAP extensions · SGP engine + PSC DNS
+  │              Org Policies (3) · GCS staging bucket
+  │              BigQuery audit dataset · Logging sink · Dashboards
   │
-  ├─▶ deploy_chat_agent.sh  (reads tfvars directly)
-  │     Writes: agents/MY-AGENT/.env
-  │       GCP_PROJECT_ID
-  │       GOOGLE_CLOUD_LOCATION
-  │       AGENT_GATEWAY_INGRESS   ← derived from prefix + project + location
-  │       AGENT_GATEWAY_EGRESS    ← derived from prefix + project + location
-  │       OTEL 3-layer fix vars   ← mandatory, prevents OTEL crashes in RE
+  ├─▶ scripts/deploy_all.sh  (reads tfvars for project_id, location, prefix)
+  │     Deploys: Reasoning Engines (4 agents)
+  │     Applies: agentGatewayConfig via _gateway_patch.pth
+  │     Grants: IAM roles to WIF principals
+  │     Creates: SGP NLC policies per agent
   │
-  └─▶ create_sgp_policy.sh
-        Registers: NLC topic constraint from sgp_nlc_constraint field
+  └─▶ scripts/destroy_all.sh  (reads same tfvars)
+        Deletes: SGP policies → REs → GCS objects → local cache
 ```
 
 ---
@@ -553,58 +556,133 @@ terraform.tfvars
 
 ```
 Agent-Gateway-Foundation/
-├── terraform.tfvars.example    ← copy this, fill in your values
-├── deploy_all.sh               ← 4-phase end-to-end deploy
-├── destroy_all.sh              ← 4-phase mirrored teardown
-├── 01_apis.tf                  ← GCP API enablement
-├── 02_network.tf               ← VPC, subnets, PSC
-├── 03_security_and_gateways.tf ← Agent Gateway, Model Armor, Cloud Armor
-├── 04_observability.tf         ← dashboards, log metrics, alerts
-├── 05_org_policies.tf          ← 3 custom org policy constraints
-├── 06_agent_provisioning.tf    ← IAM for agent identity
+├── terraform.tfvars.example        ← copy this, fill in your values
+├── deploy_all.sh                   ← root convenience wrapper → scripts/deploy_all.sh
+├── destroy_all.sh                  ← full teardown (mirrors deploy_all.sh)
+│
+├── 01_apis.tf                      ← GCP API enablement
+├── 02_network.tf                   ← VPC · subnets · PSC · Agent Gateways · SGP DNS
+├── 03_security_and_gateways.tf     ← Model Armor · DLP · IAP · SGP authz infra
+├── 04_observability.tf             ← Dashboards · log sink · alert policies
+├── 05_org_policies.tf              ← 3 custom org policy constraints
+├── 06_agent_provisioning.tf        ← GCS staging bucket · Vertex AI SA IAM
+├── 07_agent_registry.tf            ← Egress endpoint registration · RE viewer IAM
+│
 ├── agents/
-│   └── chat-agent/             ← reference agent (uses GatewayAgent SDK)
+│   ├── orchestrator/               ← store_concierge (A2A orchestrator)
+│   │   ├── agent.py                ← GatewayAgent + routing tools + AgentRegistry
+│   │   └── requirements.txt
+│   ├── pizza-agent/                ← pizza_specialist
+│   ├── burger-agent/               ← burger_specialist
+│   ├── sushi-agent/                ← sushi_specialist
+│   └── chat-agent/                 ← single-agent reference (regional Gemini)
+│
 ├── lib/
-│   └── gateway_agent/          ← GatewayAgent SDK (copy into your agent)
-│       ├── agent.py            ← GatewayAgent class
-│       ├── global_gemini.py    ← PSC-compatible regional Gemini wrapper
-│       └── telemetry.py        ← OTEL token usage callback
+│   └── gateway_agent/              ← GatewayAgent SDK
+│       ├── agent.py                ← GatewayAgent class (ADK Agent wrapper)
+│       ├── global_gemini.py        ← PSC-compatible global Gemini 3.x wrapper
+│       └── telemetry.py            ← OTEL token usage callback
+│
 ├── scripts/
-│   ├── deploy_chat_agent.sh    ← agent deploy (supports --agent-path)
-│   ├── create_sgp_policy.sh    ← SGP NLC policy registration
-│   └── patch_sdk_for_rest_create.py  ← org policy bypass monkey-patch
-├── skills/                     ← Antigravity skill library
-├── test-agent/                 ← 8 guardrail tests
-├── template/                   ← starter templates for new agents
-├── KNOWN_ISSUES.md             ← 8 production failure runbooks
-└── CHANGELOG.md
+│   ├── deploy_all.sh               ← ✅ PRIMARY: full A2A mesh deploy + E2E + SGP
+│   ├── deploy_a2a_agents.sh        ← Deploy individual specialists
+│   ├── deploy_a2a_agent.py         ← Core specialist deploy logic (AgentEngine.create)
+│   ├── redeploy_orchestrator.py    ← Orchestrator deploy logic
+│   ├── patch_a2a_classification.py ← Apply google-adk(a2a) classification PATCHes
+│   ├── create_sgp_policy.sh        ← SGP NLC policy registration
+│   ├── e2e_test.py                 ← 17-query E2E test suite
+│   ├── deploy_chat_agent.sh        ← Single-agent deploy (regional Gemini)
+│   └── deploy_global_agent.sh      ← Single-agent deploy (global Gemini 3.x)
+│
+├── skills/                         ← Antigravity skill library (9 skills)
+├── policies/                       ← SGP NLC policy templates
+├── template/                       ← Starter templates for new agents
+├── docs/                           ← Extended documentation
+├── KNOWN_ISSUES.md                 ← 13 production failure runbooks
+├── CHANGELOG.md
+└── VERSION
 ```
+
+---
+
+## Antigravity Skills Setup
+
+The `skills/` directory teaches your AI coding assistant (Antigravity) exactly
+how to set up, maintain, debug, and extend every layer.
+
+**One-time setup:**
+```bash
+mkdir -p ~/.gemini/config/skills
+for d in skills/*/; do
+  ln -sf "$(pwd)/$d" ~/.gemini/config/skills/"$(basename $d)"
+done
+echo "✅ Skills linked"
+```
+
+**Available skills:**
+
+| Skill | When to use |
+|---|---|
+| `a2a-agent-deploy` | Building or debugging A2A multi-agent systems on Vertex AI RE |
+| `a2a-multi-agent-troubleshooting` | 401/403/500 errors, empty responses, cross-agent call failures |
+| `agw-foundation-adoption` | Onboarding a new team to this foundation (Path A/B/C) |
+| `agw-add-sgp-policy` | Adding an SGP NLC policy to a deployed agent |
+| `agw-model-armor-content-authz` | Configuring Model Armor CONTENT_AUTHZ — silent failure prevention |
+| `agw-egress-iap-pitfall` | IAP on egress breaks outbound traffic — root cause + fix |
+| `gateway-agent-sdk` | Adding GatewayAgent SDK, debugging missing telemetry |
+| `sgp-network-authz-pattern` | SGP infra setup — the correct Network Authz path |
+| `sgp-policy-rules` | Writing, testing, and debugging SGP NLC rules |
+| `agent-gateway-deploy-patch` | RE deploy fails with code 13 / org policy error |
+| `vertex-ai-global-endpoint-adk` | Gemini 3.x 404 / model-not-found on regional endpoint |
 
 ---
 
 ## Troubleshooting
 
-See [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) for the full runbook. Quick reference:
+See [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) for full runbooks. Quick reference:
 
-| Symptom | Issue | Fix |
+| Symptom | Cause | Fix |
 |---|---|---|
-| `403 org policy` on first deploy | Missing `orgpolicy.policyAdmin` at org level | Get org admin to grant it, or run org policy targets separately |
-| `400 FAILED_PRECONDITION` on RE create | Org policy not propagated (needs 180s) | Wait and re-run `deploy_chat_agent.sh` |
-| `gRPC code 13 INTERNAL` on RE create | `agentGatewayConfig` missing from request | Check `.pth` monkey-patch ran correctly |
-| Agent returns 0 events, no error | `after_model_callback` TypeError (ADK 1.31+) | Use `GatewayAgent` — fixes callback signature automatically |
-| First query works, rest silent | OTEL mTLS SSL crash | `GOOGLE_API_USE_MTLS_ENDPOINT=never` in `.env` (deploy script does this) |
-| Container startup `ValidationError` | Unpinned `google-adk` or `google-cloud-aiplatform` | Pin to exact versions in `requirements.txt` |
-| `ModuleNotFoundError: gateway_agent` | `lib/` not on Python path | Add `sys.path.insert(0, "../../lib")` at top of `agent.py` |
+| `403 org policy` on first deploy | Missing `roles/orgpolicy.policyAdmin` at org level | Get org admin to grant at org scope |
+| `400 FAILED_PRECONDITION` on RE create | Org policy not propagated (needs 180s) | Wait and re-run |
+| `gRPC code 13 INTERNAL` on RE create | `agentGatewayConfig` missing — `_gateway_patch.pth` not active | Check venv has the `.pth` file |
+| `307 → 404` on stream_query | `A2aAgent` wrapper used instead of `AdkApp` | Use `AdkApp` — see `a2a-agent-deploy` skill |
+| Agent returns empty response | `classMethods` not patched, or `contextSpec` not stripped | Re-run `patch_a2a_classification.py` |
+| SGP `policy created` but no enforcement | Model Armor extension prerequisite missing | See `agw-model-armor-content-authz` skill |
+| Model Armor `500` on global endpoint | Exact host match for `aiplatform.googleapis.com` in egress MA | Use suffix match only — see `vertex-ai-global-endpoint-adk` skill |
+| E2E passes but orchestrator silent | Cross-agent call using wrong user_id or gRPC path | Check `redeploy_orchestrator.py` REST SSE routing |
+| IAP `403` on egress | `egress_iap_policy` set to ENFORCED not DRY_RUN | See `agw-egress-iap-pitfall` skill |
+
+---
+
+## Validated Results
+
+Latest E2E validation: **2026-09-29** · Project: `geap-agw` · Region: `us-east1`
+
+| Test | Agent | Result |
+|------|-------|--------|
+| Pizza order routing | `pizza_specialist` | ✅ PASS |
+| Burger order routing | `burger_specialist` | ✅ PASS |
+| Sushi order routing | `sushi_specialist` | ✅ PASS |
+| Orchestrator direct answer | `store_concierge` | ✅ PASS |
+| Orchestrator → specialist routing | `store_concierge` | ✅ PASS |
+| Model Armor prompt injection block | Ingress gateway | ✅ PASS (HTTP 403) |
+| SGP off-topic block | Egress gateway | ✅ PASS |
+| OTEL token telemetry | Cloud Trace | ✅ PASS |
+
+**SDK stack:** `google-adk==2.5.0` · `google-cloud-aiplatform==1.162.0` · `a2a-sdk==1.1.2` · `gemini-3.5-flash`
 
 ---
 
 ## Important Notes
 
-- **`agent_name` must be a Python identifier** — use underscores, not hyphens (`my_agent` ✅, `my-agent` ❌)
+- **`agent_name` must be a Python identifier** — underscores only (`my_agent` ✅, `my-agent` ❌)
 - **Never commit `terraform.tfvars`** — it contains your project ID and org ID (gitignored by default)
-- **SDK version pins are mandatory** — do NOT remove pins in `requirements.txt`. See `KNOWN_ISSUES.md` before upgrading `google-adk` or `google-cloud-aiplatform`
-- **RE state shows UNKNOWN after deploy** — this is normal platform lag. Wait 5 minutes before running tests
-- **`.env` is overwritten on every deploy** — never edit it directly; add env vars to the deploy script's heredoc
+- **SDK version pins are mandatory** — do NOT remove pins in `requirements.txt`. See `KNOWN_ISSUES.md` before upgrading
+- **`--region` and `--project` are required** — all scripts fail fast if not supplied; no hidden defaults
+- **`localhost:9999` in agentCard** — intentional A2A protocol sentinel. The real endpoint is in `agentCard.url`. The `supportedInterfaces.url` field is required by the A2A spec but unused at runtime
+- **SGP is non-fatal** — agents work without it. It is the semantic governance layer only
+- **Blue/green orchestrator deploy** — old `store_concierge` REs are deleted after the new one is ACTIVE. There is a brief window where both exist
 
 ---
 

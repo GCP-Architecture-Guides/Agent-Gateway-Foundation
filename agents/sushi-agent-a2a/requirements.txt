@@ -1,0 +1,9 @@
+google-adk[a2a]==2.5.0
+google-cloud-aiplatform[adk,agent_engines]==1.162.0
+a2a-sdk[http-server]==1.1.2
+sse-starlette
+google-genai
+google-auth
+requests
+pydantic
+cloudpickle>=3.0.0

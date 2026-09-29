@@ -29,12 +29,18 @@
 #   4. test              — Guardrail smoke tests (run_guardrail_tests.py)
 #
 # Usage:
-#   bash deploy_all.sh                  # run all phases (default)
-#   bash deploy_all.sh --phases infra   # terraform only
-#   bash deploy_all.sh --phases agent   # redeploy agent only (infra already done)
-#   bash deploy_all.sh --phases sgp     # recreate SGP policy only
-#   bash deploy_all.sh --phases test    # rerun guardrail tests only
-#   bash deploy_all.sh --phases agent,sgp,test  # skip infra, run rest
+#   bash deploy_all.sh                       # run all phases (default)
+#   bash deploy_all.sh --phases infra          # terraform only
+#   bash deploy_all.sh --phases agent          # redeploy legacy single-agent only
+#   bash deploy_all.sh --phases a2a-agents     # deploy 3-agent A2A mesh
+#   bash deploy_all.sh --phases sgp            # recreate SGP NLC policy only
+#   bash deploy_all.sh --phases test           # rerun guardrail smoke tests only
+#   bash deploy_all.sh --phases a2a-agents,sgp,test  # skip infra, run A2A + SGP + test
+#
+# A2A 3-Agent Mesh (a2a-agents phase):
+#   Deploys: pizza_specialist → burger_specialist → store_concierge (orchestrator)
+#   Specialists must finish before orchestrator so CARD_URLs are available.
+#   Requires: agents/{pizza-agent,burger-agent,orchestrator}/ directories.
 #
 # Prerequisites:
 #   - terraform.tfvars populated (project_id, prefix, agent_name, etc.)
@@ -60,13 +66,14 @@ while [[ $# -gt 0 ]]; do
     --help|-h)
       echo "Usage: $0 [--phases PHASE[,PHASE...]]"
       echo ""
-      echo "  Phases: infra | agent | sgp | test | all (default)"
-      echo "  Combine: --phases agent,sgp,test"
+      echo "  Phases: infra | agent | a2a-agents | sgp | test | all (default)"
+      echo "  Combine: --phases a2a-agents,sgp,test"
       echo ""
-      echo "  infra   — terraform apply only (bootstrap + infra)"
-      echo "  agent   — redeploy Reasoning Engine only"
-      echo "  sgp     — recreate SGP NLC policy only"
-      echo "  test    — rerun guardrail smoke tests only"
+      echo "  infra       — terraform apply only (bootstrap + infra)"
+      echo "  agent       — redeploy legacy single-agent Reasoning Engine"
+      echo "  a2a-agents  — deploy 3-agent A2A mesh (pizza + burger + orchestrator)"
+      echo "  sgp         — recreate SGP NLC policy only"
+      echo "  test        — rerun guardrail smoke tests only"
       exit 0
       ;;
     *)
@@ -143,6 +150,24 @@ if infra_enabled; then
 fi
 
 # =============================================================================
+# Phase 0.5: Firestore Setup — order management backend for A2A agents
+# Runs alongside infra bootstrap (before Terraform, which doesn't touch Firestore).
+# Idempotent — skips steps already completed on re-runs.
+# =============================================================================
+if infra_enabled; then
+  echo "▶ [0.5/4] Setting up Firestore backend (order management, inventory, loyalty)..."
+  FIRESTORE_SCRIPT="$DIR/scripts/setup_firestore.sh"
+  if [[ -f "$FIRESTORE_SCRIPT" ]]; then
+    bash "$FIRESTORE_SCRIPT"
+    echo "✅ Phase 0.5 complete — Firestore backend ready."
+  else
+    echo "  ⚠️  scripts/setup_firestore.sh not found — skipping Firestore setup."
+    echo "     Agents will fall back to simulated order responses."
+  fi
+  echo ""
+fi
+
+# =============================================================================
 # Phase 1: Infrastructure & Security (Terraform)
 # =============================================================================
 if infra_enabled; then
@@ -181,10 +206,10 @@ if infra_enabled; then
 fi
 
 # =============================================================================
-# Phase 2: Agent Deployment (adk deploy via deploy_chat_agent.sh)
+# Phase 2a: Legacy Agent Deployment (single-agent, AdkApp)
 # =============================================================================
 if phase_enabled "agent"; then
-  echo "▶ [2/4] Deploying Reasoning Engine Agent..."
+  echo "▶ [2a] Deploying Legacy Single-Agent Reasoning Engine..."
   echo ""
 
   AGENT_SCRIPT="$DIR/scripts/deploy_chat_agent.sh"
@@ -196,9 +221,35 @@ if phase_enabled "agent"; then
   bash "$AGENT_SCRIPT"
 
   echo ""
-  echo "✅ Phase 2 complete — agent deployed and ACTIVE."
+  echo "✅ Phase 2a complete — legacy agent deployed and ACTIVE."
   echo ""
 fi
+
+# =============================================================================
+# Phase 2b: A2A 4-Agent Mesh Deployment (Phase 2: Dynamic Discovery)
+# Calls deploy_a2a_agents.sh which handles all 4 agents:
+#   pizza_specialist → burger_specialist → sushi_specialist → store_concierge
+# food_court_backend.py is bundled into each agent by the deploy script.
+# =============================================================================
+if phase_enabled "a2a-agents"; then
+  echo "▶ [2b] Deploying A2A 4-Agent Mesh (Dynamic Discovery)..."
+  echo "  Sequence: pizza → burger → sushi → store_concierge (orchestrator)"
+  echo "  Backend : food_court_backend.py bundled in each agent"
+  echo ""
+
+  A2A_SCRIPT="$DIR/scripts/deploy_a2a_agents.sh"
+  if [[ ! -f "$A2A_SCRIPT" ]]; then
+    echo "❌ scripts/deploy_a2a_agents.sh not found."
+    exit 1
+  fi
+
+  bash "$A2A_SCRIPT"
+
+  echo ""
+  echo "✅ Phase 2b complete — A2A 4-agent mesh deployed."
+  echo ""
+fi
+
 
 # =============================================================================
 # Phase 3: SGP NLC Policy Registration
@@ -303,11 +354,19 @@ echo "  Project : $PROJECT_ID"
 echo "  Agent   : $AGENT_NAME"
 echo "  Region  : $REGION"
 echo ""
-echo "  Next steps:"
+echo "  Next steps (A2A 4-agent mesh):"
+echo "  • Quick E2E test across all agents:"
+echo "    .venv/bin/python test-agent/e2e_test_a2a.py"
+echo "  • Test new tools:"
+echo "    \"🕑 How long is the wait?\"        → get_estimated_wait (Firestore)"
+echo "    \"Do you have salmon in stock?\"   → check_ingredient_availability"
+echo "    \"Show me vegan options (pizza)\"  → filter_pizza_by_diet"
+echo "    \"Order Dragon Roll, cust001\"     → place_sushi_order → Firestore write"
+echo "    \"What did cust001 order before?\" → get_my_order_history (Firestore)"
+echo "  • View Firestore orders:"
+echo "    https://console.cloud.google.com/firestore/databases/-default-/data?project=$PROJECT_ID"
 echo "  • Verify SGP policy:"
 echo "    gcloud beta ai semantic-governance-policies list \\"
 echo "      --location=$REGION --project=$PROJECT_ID"
-echo "  • Send a test query:"
-echo "    bash test-agent/send_query.sh"
 echo "  • View dashboards in Cloud Monitoring for project: $PROJECT_ID"
 echo ""

@@ -133,14 +133,23 @@ resource "google_model_armor_template" "security_high" {
 }
 
 # --- Authz Extensions ---
-resource "google_network_services_authz_extension" "ma_extension" {
+#
+# Two separate MA extensions per official docs (delegate-authorization#configure-authz-ma):
+#   Ingress: fail_open = false (fail-closed) — deny inbound if MA unreachable
+#   Egress:  fail_open = true  (fail-open)  — allow egress through if MA unreachable
+#
+# WHY two extensions: a single fail-closed extension on egress would silently drop
+# all cross-RE gRPC responses if MA experiences any transient error. fail-open on
+# egress ensures LLM traffic flows while Gemini's built-in harm filters still apply.
+
+resource "google_network_services_authz_extension" "ma_extension_ingress" {
   provider  = google-beta
-  name      = "${var.prefix}-ma-extension"
+  name      = "${var.prefix}-ma-extension-ingress"
   location  = var.location
   project   = var.project_id
   service   = "modelarmor.${var.location}.rep.googleapis.com"
   timeout   = "3s"
-  fail_open = false # explicit fail-closed per official docs — deny if MA unreachable
+  fail_open = false # INGRESS: fail-closed — deny inbound traffic if MA unreachable
 
   metadata = {
     model_armor_settings = jsonencode([
@@ -150,6 +159,27 @@ resource "google_network_services_authz_extension" "ma_extension" {
         # gRPC-HTTP transcoding format (contentType/extensions metadata) that falsely triggers
         # the PI/Jailbreak filter. Model response safety is enforced by Gemini's built-in harm
         # filters at the model layer — these are always active and cannot be bypassed.
+        request_template_id = google_model_armor_template.security_high.id
+      }
+    ])
+  }
+
+  depends_on = [google_project_service.networkservices, google_model_armor_template.security_high]
+}
+
+resource "google_network_services_authz_extension" "ma_extension_egress" {
+  provider  = google-beta
+  name      = "${var.prefix}-ma-extension-egress"
+  location  = var.location
+  project   = var.project_id
+  service   = "modelarmor.${var.location}.rep.googleapis.com"
+  timeout   = "3s"
+  fail_open = true # EGRESS: fail-open — allow traffic through if MA unreachable (don't block LLM calls)
+
+  metadata = {
+    model_armor_settings = jsonencode([
+      {
+        # INPUT screening only (see ingress extension comment above for rationale).
         request_template_id = google_model_armor_template.security_high.id
       }
     ])
@@ -175,7 +205,7 @@ resource "google_network_security_authz_policy" "ingress_ma_policy" {
 
   custom_provider {
     authz_extension {
-      resources = [google_network_services_authz_extension.ma_extension.id]
+      resources = [google_network_services_authz_extension.ma_extension_ingress.id]
     }
   }
 }
@@ -199,7 +229,7 @@ resource "google_network_security_authz_policy" "egress_ma_policy" {
 
   custom_provider {
     authz_extension {
-      resources = [google_network_services_authz_extension.ma_extension.id]
+      resources = [google_network_services_authz_extension.ma_extension_egress.id]
     }
   }
 
@@ -515,15 +545,39 @@ resource "google_network_security_authz_policy" "egress_iap_policy" {
 # ==============================================================================
 
 # ==============================================================================
-# GATEWAY SERVICE ACCOUNT — MODEL ARMOR ACCESS
+# GATEWAY SERVICE ACCOUNT — MODEL ARMOR IAM (MANDATORY)
 # ==============================================================================
-# No explicit IAM grant required for the gcp-sa-dep gateway SA to call Model Armor.
-# The gcp-sa-dep SA (service-PROJECT_NUMBER@gcp-sa-dep.iam.gserviceaccount.com)
-# is a Google-managed service account. It has implicit authorization to invoke
-# the Model Armor extension endpoint through the Agent Gateway extension framework.
-# Attempting to bind roles/modelarmor.inspector at project scope returns:
-#   "Role roles/modelarmor.inspector is not supported for this resource."
-# That role does not exist. No action needed — the extension works out of the box.
+# Per official docs (delegate-authorization#configure-authz-ma), the gateway SA
+# service-PROJECT_NUMBER@gcp-sa-dep.iam.gserviceaccount.com MUST be granted:
+#   1. roles/modelarmor.calloutUser       — authenticate callouts to MA endpoint
+#   2. roles/modelarmor.user              — use MA templates in this project
+#   3. roles/serviceusage.serviceUsageConsumer — consume APIs in this project
+#
+# NOTE: Without these, the MA authz extension silently rejects all callouts.
+# With fail_open=false on ingress, this causes ALL inbound traffic to be denied.
+# With fail_open=true on egress, it fails-open (traffic flows) but MA is bypassed.
+# These grants were confirmed missing and applied 2026-08-13 (gap analysis).
+
+resource "google_project_iam_member" "gw_sa_ma_callout_user" {
+  project = var.project_id
+  role    = "roles/modelarmor.calloutUser"
+  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-dep.iam.gserviceaccount.com"
+  depends_on = [google_project_service.modelarmor]
+}
+
+resource "google_project_iam_member" "gw_sa_ma_user" {
+  project = var.project_id
+  role    = "roles/modelarmor.user"
+  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-dep.iam.gserviceaccount.com"
+  depends_on = [google_project_service.modelarmor]
+}
+
+resource "google_project_iam_member" "gw_sa_service_usage" {
+  project = var.project_id
+  role    = "roles/serviceusage.serviceUsageConsumer"
+  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-dep.iam.gserviceaccount.com"
+  depends_on = [google_project_service.modelarmor]
+}
 
 # ==============================================================================
 # SGP INGRESS POLICY — API CONSTRAINT: NOT POSSIBLE

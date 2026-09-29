@@ -78,6 +78,13 @@ resource "null_resource" "register_egress_endpoint" {
         --endpoint-spec-type=no-spec \
         --interfaces="url=https://${each.key},protocolBinding=http-json" \
         --quiet 2>&1 || echo "  (already exists or non-fatal error — continuing)"
+      # NOTE: The Agent Registry API (gcloud alpha) only accepts ONE --interfaces
+      # entry per create call. Multiple --interfaces flags cause a fieldViolations
+      # error on service.interfaces[1]. The gateway matches by hostname (FQDN
+      # from PSC DNS override), not by protocol binding — http-json is sufficient
+      # to register the host in the allowlist. If grpc-specific bindings are
+      # needed in future, use the REST API directly: PATCH /v1beta1/.../services
+      # with a full interfaces[] JSON array body.
     EOT
   }
 

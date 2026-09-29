@@ -33,8 +33,8 @@
 #   roles/logging.logWriter          — Logs Writer
 #   roles/aiplatform.sessionUser     — Reasoning Engine Session User
 #   roles/serviceusage.serviceUsageConsumer — Service Usage Consumer
+#   roles/datastore.user             — Firestore read/write (order management backend)
 #
-# WHY these roles:
 #   aiplatform.user          — Lets the agent call Vertex AI APIs (model inference,
 #                              session management, Agent Registry reads).
 #   cloudtrace.agent         — Lets the agent write distributed traces to Cloud Trace
@@ -105,6 +105,7 @@ if sa:
     "roles/logging.logWriter"
     "roles/aiplatform.sessionUser"
     "roles/serviceusage.serviceUsageConsumer"
+    "roles/datastore.user"
   )
 
   local ROLE_LABELS=(
@@ -113,6 +114,7 @@ if sa:
     "Logs Writer"
     "Reasoning Engine Session User (aiplatform.sessionUser)"
     "Service Usage Consumer"
+    "Firestore User (datastore.user) — order management backend"
   )
 
   local GRANT_ERRORS=0
@@ -137,7 +139,7 @@ if sa:
 
   if [ "$GRANT_ERRORS" -eq 0 ]; then
     echo ""
-    echo "  ✅ All 5 IAM roles granted to $AGENT_SA"
+    echo "  ✅ All 6 IAM roles granted to $AGENT_SA"
   else
     echo ""
     echo "  ⚠️  $GRANT_ERRORS role grant(s) failed — agent may lack some permissions."

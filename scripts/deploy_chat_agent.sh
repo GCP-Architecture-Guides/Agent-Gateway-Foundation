@@ -218,12 +218,6 @@ if [ "$DEPLOY_EXIT" -ne 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Post-deploy: source shared IAM grant helper.
-# ---------------------------------------------------------------------------
-# shellcheck source=scripts/grant_agent_iam_roles.sh
-source "$(dirname "$0")/grant_agent_iam_roles.sh"
-
-# ---------------------------------------------------------------------------
 # Post-deploy: strip server-injected contextSpec.memoryBankConfig.
 # ---------------------------------------------------------------------------
 echo "Stripping server-injected contextSpec from the new RE..."
@@ -259,32 +253,26 @@ if [ -n "$NEW_RE_ID" ]; then
   )
   echo "  PATCH sent — response: $(echo $PATCH_RESULT | head -c 200)"
 
-  # Wait for RE to become ACTIVE after contextSpec strip (up to 300s)
+  # Wait for RE to become ACTIVE after contextSpec strip (up to 150s)
   echo "  Waiting for RE $NEW_RE_ID to become ACTIVE..."
   RE_STATE="UNKNOWN"
-  for i in $(seq 1 60); do
+  for i in $(seq 1 30); do
     sleep 5
     RE_STATE=$(
       curl -s -H "Authorization: Bearer $PATCH_TOKEN" \
         "https://us-east1-aiplatform.googleapis.com/v1beta1/projects/geap-agw/locations/us-east1/reasoningEngines/$NEW_RE_ID" \
       | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('state','UNKNOWN'))" 2>/dev/null
     )
-    echo "  [attempt $i/60] state=$RE_STATE"
+    echo "  [attempt $i/30] state=$RE_STATE"
     if [ "$RE_STATE" = "ACTIVE" ]; then
       echo "  ✅ RE is ACTIVE — contextSpec stripped successfully."
       break
     fi
   done
   if [ "$RE_STATE" != "ACTIVE" ]; then
-    echo "  ⚠️  RE did not reach ACTIVE in 300s — final state: $RE_STATE"
+    echo "  ⚠️  RE did not reach ACTIVE in 150s — final state: $RE_STATE"
     echo "  ⚠️  Check Cloud Logging for startup errors."
   fi
-
-  # -------------------------------------------------------------------------
-  # Grant 5 required IAM roles to the Agent Identity SA.
-  # Runs unconditionally once RE ID is known — idempotent on re-deploy.
-  # -------------------------------------------------------------------------
-  grant_agent_iam_roles "geap-agw" "us-east1" "$NEW_RE_ID" "$PATCH_TOKEN"
 else
   echo "  ⚠️  Could not locate RE — contextSpec PATCH skipped. Check deploy logs."
 fi

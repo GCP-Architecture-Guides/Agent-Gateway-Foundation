@@ -61,7 +61,9 @@ if [[ -z "$REGION" ]]; then
   exit 1
 fi
 PREFIX=$(grep -oP '^prefix\s*=\s*"\K[^"]+' terraform.tfvars 2>/dev/null || echo "")
-AGENT_NAME=$(grep -oP '^agent_name\s*=\s*"\K[^"]+' terraform.tfvars 2>/dev/null || echo "my-agent")
+# AGENT_NAME: env var override takes priority over terraform.tfvars
+# This allows deploy_all.sh to call this script in a loop for each food-court agent.
+AGENT_NAME="${AGENT_NAME:-$(grep -oP '^agent_name\s*=\s*"\K[^"]+' terraform.tfvars 2>/dev/null || echo "my-agent")}"
 AGENT_DESC=$(grep -oP '^agent_description\s*=\s*"\K[^"]+' terraform.tfvars 2>/dev/null || echo "")
 
 if [[ -z "$PROJECT_ID" ]]; then

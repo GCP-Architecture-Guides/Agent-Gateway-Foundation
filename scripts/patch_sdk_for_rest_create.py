@@ -111,6 +111,37 @@ _OTEL_VARS = [
     ("agent_role", "customer-support"),
 ]
 
+# ---------------------------------------------------------------------------
+# UNCONDITIONAL: Patch resource_manager_utils.get_project_id to read from env.
+# This MUST run regardless of INGRESS/EGRESS being set.
+# Without this, ADK's adk.py:set_up() calls project_id() → get_project_id(None)
+# → AttributeError: 'NoneType' object has no attribute 'project_id'
+# which crashes the RE container at startup (LRO code 3).
+# GCP_PROJECT_ID is a non-reserved env var alias we inject; the platform also
+# sets GOOGLE_CLOUD_PROJECT automatically so we try both.
+# ---------------------------------------------------------------------------
+try:
+    from google.cloud.aiplatform.utils import resource_manager_utils as _rmutils
+    def _patched_get_project_id(project=None, **kwargs):
+        # Accept project_number= and credentials= kwargs from SDK without crashing.
+        # If a real project string is passed, delegate to original for resolution.
+        if project is not None:
+            try:
+                return _rmutils.__class__._orig_get_project_id(project)
+            except Exception:
+                pass
+        return (
+            _os.environ.get("GCP_PROJECT_ID")
+            or _os.environ.get("GOOGLE_CLOUD_PROJECT")
+            or ""
+        )
+    _rmutils.get_project_id = _patched_get_project_id
+    print("[gateway_patch] Patched resource_manager_utils.get_project_id (NoneType fix)",
+          file=_sys.stderr, flush=True)
+except Exception as _e:
+    print(f"[gateway_patch] get_project_id patch skipped: {_e}",
+          file=_sys.stderr, flush=True)
+
 
 def _inject_wheel_into_archive(body):
     """
@@ -268,6 +299,11 @@ class _GwFuture:
         self._cred = creds
         self._loc  = location
         self._proj = project
+        # Caveat #18: SDK 1.162.0 logs operation_future.operation.name after
+        # AgentEngine.create() returns the LRO. Without this attribute,
+        # AttributeError crashes the deploy before polling begins.
+        import types as _pytypes
+        self.operation = _pytypes.SimpleNamespace(name=op_name)
 
     def result(self, timeout=900):
         import time
@@ -476,6 +512,55 @@ def _apply():
               file=_sys.stderr, flush=True)
     except Exception as exc:
         print(f"[gateway_patch] httpx patch skipped: {exc}",
+              file=_sys.stderr, flush=True)
+
+    # ------------------------------------------------------------------ #
+    # ASYNC httpx patch — CRITICAL for A2A cross-agent calls              #
+    # A2A SDK uses httpx.AsyncClient for all message:send calls.          #
+    # The sync httpx.Client patch above does NOT cover async calls.       #
+    # Without this: orchestrator → sub-agent A2A calls return 401.        #
+    # ------------------------------------------------------------------ #
+    try:
+        import httpx as _httpx_async
+        _orig_async_send = _httpx_async.AsyncClient.send
+
+        async def _patched_async_send(self, request, **kwargs):
+            url_str = str(request.url)
+            # Inject auth token for all aiplatform calls (A2A message:send)
+            if "aiplatform.googleapis.com" in url_str:
+                if not request.headers.get("authorization", ""):
+                    try:
+                        import google.auth as _ga
+                        import google.auth.transport.requests as _gatr
+                        _creds, _ = _ga.default(
+                            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                        )
+                        _creds.refresh(_gatr.Request())
+                        # httpx headers are immutable — rebuild with auth header
+                        headers = dict(request.headers)
+                        headers["authorization"] = f"Bearer {_creds.token}"
+                        request = _httpx_async.Request(
+                            method=request.method,
+                            url=request.url,
+                            headers=headers,
+                            content=request.content,
+                        )
+                        print(
+                            f"[gateway_patch] async httpx: injected Bearer token for {url_str[:80]}",
+                            file=_sys.stderr, flush=True,
+                        )
+                    except Exception as _auth_err:
+                        print(
+                            f"[gateway_patch] async httpx: auth inject failed: {_auth_err}",
+                            file=_sys.stderr, flush=True,
+                        )
+            return await _orig_async_send(self, request, **kwargs)
+
+        _httpx_async.AsyncClient.send = _patched_async_send
+        print("[gateway_patch] Patched httpx.AsyncClient.send (A2A cross-agent auth)",
+              file=_sys.stderr, flush=True)
+    except Exception as exc:
+        print(f"[gateway_patch] async httpx patch skipped: {exc}",
               file=_sys.stderr, flush=True)
 
     # ------------------------------------------------------------------ #
