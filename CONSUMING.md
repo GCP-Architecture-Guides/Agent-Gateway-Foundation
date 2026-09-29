@@ -139,7 +139,7 @@ export OTEL_RESOURCE_ATTRIBUTES="gcp.project.id=my-team-project,deployment.regio
 
 # SDK version pins (do not change)
 export GATEWAY_AGENT_SDK_VERSION="1.0.0"
-export GOOGLE_ADK_VERSION="1.31.1"
+export GOOGLE_ADK_VERSION="2.5.0"
 export GOOGLE_CLOUD_AIPLATFORM_VERSION="1.149.0"
 ```
 
@@ -170,7 +170,7 @@ Update `agents/my-agent/requirements.txt`:
 ```
 --extra-index-url https://REGION-python.pkg.dev/SDK_PROJECT_ID/agw-python-packages/simple/
 gateway-agent-sdk==1.0.0
-google-adk==1.31.1
+google-adk==2.5.0
 google-cloud-aiplatform[adk,agent_engines]==1.149.0
 ```
 

@@ -14,7 +14,7 @@
 
 # Core ADK runtime — GatewayAgent, Agent, Gemini, AdkApp, ASGI server
 # WARNING: Do NOT upgrade without testing the .pth patch still intercepts.
-google-adk==1.31.1
+google-adk==2.5.0
 
 # Vertex AI SDK — ReasoningEngine, AdkApp hosting, staging bucket
 # WARNING: Do NOT upgrade without verifying AuthorizedSession transport is used.

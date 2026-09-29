@@ -70,7 +70,7 @@ fi
 
 echo "▶ Installing SDK (pinned versions)..."
 "${VENV}/bin/pip" install -q \
-  "google-adk==${GOOGLE_ADK_VERSION:-1.31.1}" \
+  "google-adk==${GOOGLE_ADK_VERSION:-2.5.0}" \
   "google-cloud-aiplatform[adk,agent_engines]==${GOOGLE_CLOUD_AIPLATFORM_VERSION:-1.149.0}"
 
 echo "▶ Installing agent requirements..."

@@ -154,7 +154,7 @@ export OTEL_RESOURCE_ATTRIBUTES="gcp.project.id=${PROJECT_ID},deployment.region=
 # ── SDK Version Pins ────────────────────────────────────────────────────────
 # CRITICAL: Do NOT change these. See KNOWN_ISSUES.md #008.
 export GATEWAY_AGENT_SDK_VERSION="1.0.0"
-export GOOGLE_ADK_VERSION="1.31.1"
+export GOOGLE_ADK_VERSION="2.5.0"
 export GOOGLE_CLOUD_AIPLATFORM_VERSION="1.149.0"
 
 # ── Prefix ─────────────────────────────────────────────────────────────────

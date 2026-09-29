@@ -2,7 +2,7 @@
 name: a2a-agent-runtime
 description: >
   DEPRECATED — superseded by a2a-agent-deploy skill. This skill was validated
-  against google-adk==1.31.1 + google-cloud-aiplatform==1.149.0 (preview SDK path).
+  against google-adk==2.5.0 + google-cloud-aiplatform[agent_engines,adk]==1.162.0 (preview SDK path).
   Those SDK versions and the preview import path are no longer correct. Use the
   a2a-agent-deploy skill for all new deployments.
 ---
@@ -55,8 +55,8 @@ This skill documents deploying a multi-agent A2A system where:
 
 **Validated SDK versions:**
 ```
-google-cloud-aiplatform==1.149.0
-google-adk==1.31.1
+google-cloud-aiplatform[agent_engines,adk]==1.162.0
+google-adk==2.5.0
 a2a-sdk==1.1.2
 ```
 
@@ -67,7 +67,7 @@ a2a-sdk==1.1.2
 ### Bug 1 — `A2aApp` Does Not Exist → Use `A2aAgent`
 
 ```python
-# ❌ WRONG — A2aApp is not in google-cloud-aiplatform==1.149.0
+# ❌ WRONG — A2aApp is not in google-cloud-aiplatform[agent_engines,adk]==1.162.0
 from vertexai.preview.reasoning_engines.templates.a2a import A2aApp
 
 # ✅ CORRECT
@@ -118,10 +118,10 @@ await updater.add_artifact([Part(text=answer)], name="response")
 
 ```bash
 # ❌ WRONG — [a2a] extra pins a2a-sdk>=0.3.4,<0.4.0 which is NOT on PyPI
-pip install "google-adk[a2a]==1.31.1"
+pip install "google-adk[agent-identity,a2a,mcp]==2.5.0"
 
 # ✅ CORRECT — install a2a-sdk separately
-pip install google-adk==1.31.1 a2a-sdk==1.1.2
+pip install google-adk==2.5.0 a2a-sdk==1.1.2
 ```
 
 ---
@@ -269,14 +269,14 @@ root_agent = LlmAgent(
 
 **Specialists:**
 ```
-google-adk>=1.31.1
+google-adk>=2.5.0
 google-cloud-aiplatform[adk,agent_engines]==1.149.0
 a2a-sdk==1.1.2
 ```
 
 **Orchestrator:**
 ```
-google-adk>=1.31.1
+google-adk>=2.5.0
 google-cloud-aiplatform[adk,agent_engines]==1.149.0
 a2a-sdk==1.1.2
 httpx>=0.27.0

@@ -181,8 +181,8 @@ gcloud projects add-iam-policy-binding PROJECT_ID \
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `code: 13` or `400 FAILED_PRECONDITION` (all 4 constraints) | Newer `google-cloud-aiplatform` switched transport from `AuthorizedSession` → `agentplatform.Client` — patch interceptors don't fire | Pin `google-cloud-aiplatform[adk,agent_engines]==1.149.0` and `google-adk==1.31.1` in the deploy `.venv` pip install. Delete `.venv` and re-run deploy. |
-| `ValidationError: 1 validation error for GatewayAgent` (container startup crash) | RE container `requirements.txt` is unpinned — installs newer ADK that changed the `Agent` Pydantic `model` field type | Pin `google-adk==1.31.1` in `agents/chat-agent/requirements.txt`. Both the deploy `.venv` AND the container requirements must be pinned. |
+| `code: 13` or `400 FAILED_PRECONDITION` (all 4 constraints) | Newer `google-cloud-aiplatform` switched transport from `AuthorizedSession` → `agentplatform.Client` — patch interceptors don't fire | Pin `google-cloud-aiplatform[agent_engines,adk]==1.162.0` and `google-adk==2.5.0` in the deploy `.venv` pip install. Delete `.venv` and re-run deploy. |
+| `ValidationError: 1 validation error for GatewayAgent` (container startup crash) | RE container `requirements.txt` is unpinned — installs newer ADK that changed the `Agent` Pydantic `model` field type | Pin `google-adk==2.5.0` in `agents/chat-agent/requirements.txt`. Both the deploy `.venv` AND the container requirements must be pinned. |
 | `code: 13` on CREATE | Missing `agentGatewayConfig` or bad `contextSpec` | Verify patch is loaded (check stderr for `[gateway_patch]` messages). Ensure no `contextSpec: {}`. |
 | `SyntaxError` in `_gateway_patch.py` | Broken f-strings or edit artifacts | Re-run `patch_sdk_for_rest_create.py` to regenerate a clean copy. |
 | `[gateway_patch] No AGENT_GATEWAY_INGRESS/EGRESS — skipping.` | Env vars not set | Export `AGENT_GATEWAY_INGRESS` and `AGENT_GATEWAY_EGRESS` in the shell before `deploy.sh`. They must be in `versions.env`. |

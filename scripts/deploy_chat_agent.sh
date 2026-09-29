@@ -47,7 +47,7 @@ echo "Installing ADK and requirements (pinned to known-working versions)..."
 # patch interceptors (AuthorizedSession + httpx + GAPIC class) no longer fire,
 # causing ALL 4 org policy constraints to be violated (400 FAILED_PRECONDITION).
 # See KNOWN_ISSUES.md #008.
-.venv/bin/pip install -i https://pypi.org/simple -q --no-deps "google-adk==1.31.1"
+.venv/bin/pip install -i https://pypi.org/simple -q --no-deps "google-adk==2.5.0"
 .venv/bin/pip install -i https://pypi.org/simple -q "google-cloud-aiplatform[adk,agent_engines]==1.149.0" "requests" "pydantic"
 
 export AGENT_GATEWAY_INGRESS="projects/geap-agw/locations/us-east1/agentGateways/geap-ingress-gateway"

@@ -12,7 +12,7 @@
 #     you haven't accidentally pinned a transitive dep too tightly.
 #
 # Why these exact versions?
-#   - google-adk==1.31.1: last version whose Agent Pydantic model accepts
+#   - google-adk==2.5.0: last version whose Agent Pydantic model accepts
 #     a BaseLlm object (GlobalGemini instance) as the 'model' field.
 #     Newer ADK versions changed model to str-only → ValidationError on startup.
 #   - google-cloud-aiplatform==1.149.0: last version that uses AuthorizedSession
@@ -24,7 +24,7 @@
 
 # Core ADK runtime — GatewayAgent, Agent, Gemini, AdkApp, ASGI server
 # WARNING: Do NOT upgrade without testing the .pth patch still intercepts.
-google-adk==1.31.1
+google-adk==2.5.0
 
 # Vertex AI SDK — ReasoningEngine, AdkApp hosting, staging bucket
 # WARNING: Do NOT upgrade without verifying AuthorizedSession transport is used.

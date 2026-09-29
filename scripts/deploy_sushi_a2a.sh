@@ -51,7 +51,7 @@ echo ""
 # ---------------------------------------------------------------------------
 # [1] Locate a Python 3.12 venv with all A2A packages installed.
 # The Airlock mirror (go/corp-airlock) only has aiplatform==1.149.0 and
-# google-adk==1.31.1 — it blocks 1.162.0, adk==2.5.0, and a2a-sdk==1.1.2.
+# Uses google-adk==2.5.0 + aiplatform==1.162.0 + a2a-sdk==1.1.2 (same stack as deploy_a2a_agent.py).
 # We reuse an existing venv from another project that already has them.
 # ---------------------------------------------------------------------------
 FIVEG_VENV="$HOME/Desktop/Workspace/fiveg-ran-agent/foundation/.venv"
