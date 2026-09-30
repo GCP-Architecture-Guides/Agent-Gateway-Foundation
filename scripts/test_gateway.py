@@ -40,7 +40,7 @@ import urllib.error
 
 # ── Config (read from terraform.tfvars) ──────────────────────────────────────
 # BUG-23 FIX: Use __file__-relative path so script works from any directory.
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 _TFVARS_PATH = os.path.join(_SCRIPT_DIR, "..", "terraform.tfvars")
 
 def read_tfvar(key):

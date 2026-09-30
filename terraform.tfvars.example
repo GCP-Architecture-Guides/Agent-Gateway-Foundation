@@ -64,7 +64,6 @@ allowed_egress_hosts = [
   "api.github.com",
   "raw.githubusercontent.com",
   "www.google.com",
-  "docs.cloud.google.com",
 
   # ---- GCP APIs beyond foundation defaults (add as needed) ----
   "cloudasset.googleapis.com",
