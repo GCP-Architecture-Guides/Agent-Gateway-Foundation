@@ -31,6 +31,9 @@
 
 set -uo pipefail
 
+# Validate required dependencies
+command -v jq >/dev/null 2>&1 || { echo "[provision_sgp_engine] ERROR: jq is required but not installed." >&2; exit 1; }
+
 PROJECT_ID="${1:-}"
 LOCATION="${2:-}"
 
@@ -136,5 +139,7 @@ fi
 # ─── Step 5: Hard failure — fresh project, no cache, engine not ready ─────────
 echo "[provision_sgp_engine] ERROR: SGP engine not ready after ${MAX_ATTEMPTS} attempts." >&2
 echo "  Wait 5-10 minutes for SGP engine initialization and re-run terraform apply." >&2
-jq -n '{"error":"SGP engine pscServiceAttachment not yet available"}'
+# NOTE: On exit 1, data.external reads stderr for error message, NOT stdout.
+# Emit the error details to stderr only so Terraform surfaces them correctly.
+echo '{"error":"SGP engine not ready. Re-run terraform apply after 5-10 min."}' >&2
 exit 1

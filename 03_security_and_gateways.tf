@@ -158,12 +158,15 @@ resource "google_model_armor_template" "security_high" {
 }
 
 # Template 2: security-responses — MODEL RESPONSES (egress response_template_id only)
-# Lighter than security-high: RAI + PII screening only.
-#   PI/Jailbreak DISABLED — LLM outputs don't contain injected prompts; enabling it
-#     causes false positives on gRPC transcoding metadata in :streamQuery responses.
-#   Malicious URI DISABLED — models legitimately reference URLs in explanations;
-#     flagging them causes too many false positives on valid responses.
-#   RAI MEDIUM — catches genuinely harmful model outputs without over-blocking.
+# Lighter than security-high: lower thresholds, same filter set.
+#   PI/Jailbreak ENABLED / MEDIUM_AND_ABOVE — org floor policy (modelarmor.floorSetting)
+#     mandates ENABLED on all templates. MEDIUM_AND_ABOVE is the least-restrictive
+#     valid threshold, minimizing false positives on LLM output vs HIGH on user prompts.
+#   Malicious URI ENABLED — org floor policy mandates ENABLED. Models citing legitimate
+#     URLs in explanations may cause occasional false positives; raise a floor exception
+#     via the org MA admin if this is problematic.
+#   RAI LOW_AND_ABOVE — catches genuinely harmful model outputs without over-blocking.
+#     Lower than prompt screening (HIGH) since model output already passed Gemini safety.
 #   SDP — catches PII accidentally leaked in model responses.
 resource "google_model_armor_template" "security_responses" {
   template_id  = "security-responses"
@@ -403,7 +406,17 @@ resource "google_network_services_authz_extension" "sgp_extension" {
   timeout   = "3s"
   fail_open = false # explicit fail-closed per official docs — deny if SGP unreachable
 
-  depends_on = [google_project_service.networkservices]
+  # BUG-14 FIX: Explicit depends_on for PSC + DNS infrastructure.
+  # The sgp_extension service field is "sgp.internal.gemini-corp" — a private DNS name
+  # that only resolves inside the VPC via the PSC forwarding rule + DNS record in
+  # 02_network.tf. Without this depends_on, Terraform may create the extension before
+  # the DNS/PSC infrastructure is ready, causing the SGP extension to reference an
+  # unresolvable endpoint at the Agent Gateway API level.
+  depends_on = [
+    google_project_service.networkservices,
+    google_compute_forwarding_rule.sgp_psc_endpoint,
+    google_dns_record_set.sgp_a_record,
+  ]
 }
 
 resource "google_network_security_authz_policy" "egress_sgp_policy" {

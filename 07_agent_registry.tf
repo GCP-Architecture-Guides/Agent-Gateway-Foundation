@@ -43,7 +43,7 @@
 # NOTE: google_agent_registry_service Terraform resource requires google-beta
 # provider >= 7.42.0. This deployment runs 7.38.0, so we use null_resource +
 # gcloud alpha agent-registry services create (confirmed-working pattern, same
-# as the SGP engine lookup in 02_network.tf). When the provider is upgraded to
+# as the SGP engine lookup in 03_security_and_gateways.tf). When the provider is upgraded to
 # >= 7.42.0, replace null_resource blocks with google_agent_registry_service.
 # ==============================================================================
 

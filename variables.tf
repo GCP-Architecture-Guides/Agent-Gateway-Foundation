@@ -411,7 +411,8 @@ variable "allowed_egress_hosts" {
     "api.github.com",
     "raw.githubusercontent.com",
     "www.googleapis.com",
-    "docs.cloud.google.com",
+    # docs.cloud.google.com removed: documentation site, not an API endpoint. Agent Registry
+    # registration fails silently for this host (no PSC attachment).
     "www.google.com",
     "iamcredentials.googleapis.com",
     "oauth2.googleapis.com",

@@ -47,8 +47,14 @@ echo "Installing ADK and requirements (pinned to known-working versions)..."
 # patch interceptors (AuthorizedSession + httpx + GAPIC class) no longer fire,
 # causing ALL 4 org policy constraints to be violated (400 FAILED_PRECONDITION).
 # See KNOWN_ISSUES.md #008.
-.venv/bin/pip install -i https://pypi.org/simple -q --no-deps "google-adk==2.5.0"
+# Install aiplatform FIRST so it resolves its own transitive deps (including google-adk)
 .venv/bin/pip install -i https://pypi.org/simple -q "google-cloud-aiplatform[adk,agent_engines]==1.149.0" "requests" "pydantic"
+# Then reinstall google-adk at our PINNED version — overrides the transitive dep version
+# that aiplatform just pulled in. Without this second install, aiplatform installs the
+# latest google-adk (currently 1.35.2) which breaks the Pydantic Agent model validation
+# (newer ADK changed 'model' field from BaseLlm to str-only → ValidationError on startup).
+# See KNOWN_ISSUES.md #008 for full root cause.
+.venv/bin/pip install -i https://pypi.org/simple -q --force-reinstall --no-deps "google-adk==2.5.0"
 
 export AGENT_GATEWAY_INGRESS="projects/geap-agw/locations/us-east1/agentGateways/geap-ingress-gateway"
 export AGENT_GATEWAY_EGRESS="projects/geap-agw/locations/us-east1/agentGateways/geap-egress-gateway"
@@ -196,6 +202,11 @@ fi
 
 echo "Deploying ADK Agent natively..."
 DEPLOY_TMPLOG=$(mktemp /tmp/adk_deploy_XXXXXX.log)
+# Disable set -e around adk deploy so PIPESTATUS[0] is reliably captured.
+# With set -e + pipefail, a non-zero exit from adk deploy aborts the shell before
+# DEPLOY_EXIT=${PIPESTATUS[0]} is reached, causing the script to exit without
+# the cleanup steps (SDK bundle removal, RE ID extraction, contextSpec strip).
+set +e
 .venv/bin/adk deploy agent_engine \
   --project="geap-agw" \
   --region="us-east1" \
@@ -204,6 +215,7 @@ DEPLOY_TMPLOG=$(mktemp /tmp/adk_deploy_XXXXXX.log)
   agents/chat-agent 2>&1 | tee "$DEPLOY_TMPLOG"
 
 DEPLOY_EXIT=${PIPESTATUS[0]}
+set -e
 
 # ---------------------------------------------------------------------------
 # SDK CLEANUP: Remove the temporary copy from agents/chat-agent/.
