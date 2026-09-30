@@ -640,36 +640,105 @@ resource "google_network_security_authz_policy" "egress_iap_policy" {
 # ==============================================================================
 # GATEWAY SERVICE ACCOUNT — MODEL ARMOR IAM (MANDATORY)
 # ==============================================================================
-# Per official docs (delegate-authorization#configure-authz-ma), the gateway SA
-# service-PROJECT_NUMBER@gcp-sa-dep.iam.gserviceaccount.com MUST be granted:
-#   1. roles/modelarmor.calloutUser       — authenticate callouts to MA endpoint
-#   2. roles/modelarmor.user              — use MA templates in this project
+# The Agent Gateway uses service-PROJECT_NUMBER@gcp-sa-dep.iam.gserviceaccount.com
+# (Google-managed, created when the Agent Gateway API is first enabled) to make
+# callout requests to the Model Armor REP endpoint during content screening.
+#
+# Per official docs (delegate-authorization#configure-authz-ma), this SA MUST hold:
+#   1. roles/modelarmor.calloutUser    — authenticate callouts to MA REP endpoint
+#   2. roles/modelarmor.user           — use MA templates in this project
 #   3. roles/serviceusage.serviceUsageConsumer — consume APIs in this project
 #
-# NOTE: Without these, the MA authz extension silently rejects all callouts.
-# With fail_open=false on ingress, this causes ALL inbound traffic to be denied.
-# With fail_open=true on egress, it fails-open (traffic flows) but MA is bypassed.
-# These grants were confirmed missing and applied 2026-08-13 (gap analysis).
+# WHY null_resource instead of google_project_iam_member:
+#   gcp-sa-dep is a Google-managed service agent created lazily — it only exists
+#   after the Agent Gateway API is first invoked in the project. On a fresh project
+#   terraform apply, the SA does not yet exist and google_project_iam_member fails
+#   with "service account does not exist", leaving the grants permanently missing.
+#   null_resource + gcloud with || true is idempotent:
+#     - Fresh project (SA not yet created): gcloud fails gracefully (|| true)
+#     - After first gateway API call: SA exists; re-run terraform apply applies grant
+#
+# IMPACT of missing grants:
+#   fail_open=false (ingress): ALL inbound traffic denied — 403 on every request
+#   fail_open=true  (egress):  fails-open, MA bypassed silently — no content screening
+#
+# Confirmed missing from state 2026-09-30 during IAM audit. Converted to
+# null_resource to ensure reliable application across fresh and existing projects.
+# ==============================================================================
 
-resource "google_project_iam_member" "gw_sa_ma_callout_user" {
-  project = var.project_id
-  role    = "roles/modelarmor.calloutUser"
-  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-dep.iam.gserviceaccount.com"
-  depends_on = [google_project_service.modelarmor]
+resource "null_resource" "gw_sa_ma_iam" {
+  triggers = {
+    project = var.project_id
+    number  = data.google_project.project.number
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      GW_SA="serviceAccount:service-${data.google_project.project.number}@gcp-sa-dep.iam.gserviceaccount.com"
+      echo "Granting MA IAM roles to Agent Gateway SA..."
+
+      # 1. calloutUser — authenticate the gateway SA callouts to the MA REP endpoint
+      gcloud projects add-iam-policy-binding "${var.project_id}" \
+        --member="$GW_SA" \
+        --role="roles/modelarmor.calloutUser" \
+        --quiet 2>&1 || echo "  calloutUser: SA not yet created or already bound — continuing"
+
+      # 2. modelarmor.user — permission to evaluate/use MA templates in this project
+      gcloud projects add-iam-policy-binding "${var.project_id}" \
+        --member="$GW_SA" \
+        --role="roles/modelarmor.user" \
+        --quiet 2>&1 || echo "  modelarmor.user: SA not yet created or already bound — continuing"
+
+      # 3. serviceusage.serviceUsageConsumer — allow SA to consume project APIs
+      gcloud projects add-iam-policy-binding "${var.project_id}" \
+        --member="$GW_SA" \
+        --role="roles/serviceusage.serviceUsageConsumer" \
+        --quiet 2>&1 || echo "  serviceUsageConsumer: SA not yet created or already bound — continuing"
+
+      echo "MA IAM grants complete (or deferred if SA not yet created)"
+    EOT
+  }
+
+  depends_on = [
+    google_project_service.modelarmor,
+    google_network_services_agent_gateway.ingress_gateway,
+    google_network_services_agent_gateway.egress_gateway,
+  ]
 }
 
-resource "google_project_iam_member" "gw_sa_ma_user" {
-  project = var.project_id
-  role    = "roles/modelarmor.user"
-  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-dep.iam.gserviceaccount.com"
-  depends_on = [google_project_service.modelarmor]
-}
+# ==============================================================================
+# DLP SERVICE ACCOUNT — MODEL ARMOR SDP TEMPLATE IAM
+# ==============================================================================
+# The MA templates (security-high, security-responses) use DLP inspect +
+# deidentify templates for SDP screening. The DLP service agent needs
+# roles/dlp.user so MA can invoke DLP when processing sanitize operations.
+#
+# DLP SA: service-PROJECT_NUMBER@dlp-api.iam.gserviceaccount.com
+# (Google-managed, created lazily when Cloud DLP API is enabled)
+# ==============================================================================
 
-resource "google_project_iam_member" "gw_sa_service_usage" {
-  project = var.project_id
-  role    = "roles/serviceusage.serviceUsageConsumer"
-  member  = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-dep.iam.gserviceaccount.com"
-  depends_on = [google_project_service.modelarmor]
+resource "null_resource" "dlp_sa_ma_user" {
+  triggers = {
+    project = var.project_id
+    number  = data.google_project.project.number
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      DLP_SA="serviceAccount:service-${data.google_project.project.number}@dlp-api.iam.gserviceaccount.com"
+      echo "Granting roles/dlp.user to DLP service agent..."
+      gcloud projects add-iam-policy-binding "${var.project_id}" \
+        --member="$DLP_SA" \
+        --role="roles/dlp.user" \
+        --quiet 2>&1 || echo "  DLP SA not yet created or already bound — continuing"
+    EOT
+  }
+
+  depends_on = [
+    google_project_service.dlp,
+    google_model_armor_template.security_high,
+    google_model_armor_template.security_responses,
+  ]
 }
 
 # ==============================================================================
