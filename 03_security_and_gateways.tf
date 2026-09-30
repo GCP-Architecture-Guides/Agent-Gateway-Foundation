@@ -96,14 +96,17 @@ resource "google_data_loss_prevention_deidentify_template" "deidentify_template"
 #   The egress gateway screens BOTH the outbound request (tool call to Vertex AI) AND
 #   the inbound response (LLM output returning to the agent). These have different risk
 #   profiles and different false-positive characteristics:
-#     - Prompt Injection / Jailbreak: DISABLED on responses. LLM outputs don't contain
-#       injected prompts. The gRPC-HTTP transcoding wrapper on :streamQuery responses
-#       includes metadata fields (contentType, extensions) that falsely trigger the PI
-#       filter, causing valid responses to be blocked.
-#     - RAI + PII: ENABLED on responses (MEDIUM threshold). Catches harmful content or
-#       accidental PII leakage in model output.
-#     - Malicious URIs: DISABLED on responses — models sometimes reference URLs in
-#       explanatory text; flagging these as malicious causes too many false positives.
+#     - Prompt Injection / Jailbreak: ENABLED at LOW confidence (org floor policy
+#       mandates ENABLED; LOW minimizes false positives on LLM output vs HIGH on prompts).
+#     - RAI + PII: ENABLED at LOW_AND_ABOVE threshold. Catches harmful output; lower
+#       threshold than prompts (HIGH) since model output already passed Gemini safety.
+#     - Malicious URIs: ENABLED (org floor policy mandates ENABLED). If models citing
+#       legitimate URLs in explanations causes false positives, raise a floor exception.
+#
+#   ORG FLOOR POLICY NOTE: The project/org enforces modelarmor.floorSetting which
+#   requires PI/Jailbreak and Malicious URI to be ENABLED on all templates. The
+#   security-responses template uses the minimum compliant settings (LOW confidence)
+#   to reduce false positives while satisfying the org policy constraint.
 
 resource "google_model_armor_template" "security_high" {
   template_id  = "security-high"
@@ -169,9 +172,15 @@ resource "google_model_armor_template" "security_responses" {
   depends_on   = [google_project_service.modelarmor, google_data_loss_prevention_inspect_template.identification_template, google_data_loss_prevention_deidentify_template.deidentify_template]
 
   filter_config {
-    # PI/Jailbreak: DISABLED on responses — avoids gRPC transcoding false positives
+    # PI/Jailbreak: ENABLED at LOW confidence — required by org floor policy (modelarmor.floorSetting).
+    # LOW confidence on LLM responses minimizes false positives: most responses are not
+    # injection attempts. HIGH confidence is reserved for user-supplied prompts (security-high).
+    # NOTE: We originally intended DISABLED here to avoid gRPC transcoding false positives
+    # on :streamQuery responses, but the org floor policy mandates ENABLED. LOW is the
+    # least-restrictive compliant setting.
     pi_and_jailbreak_filter_settings {
-      filter_enforcement = "DISABLED"
+      filter_enforcement = "ENABLED"
+      confidence_level   = "LOW"
     }
     # SDP: catch PII leakage in model output (e.g. SSN, API keys in generated text)
     sdp_settings {
@@ -180,11 +189,15 @@ resource "google_model_armor_template" "security_responses" {
         deidentify_template = google_data_loss_prevention_deidentify_template.deidentify_template.id
       }
     }
-    # Malicious URI: DISABLED on responses (too many false positives on model-cited URLs)
+    # Malicious URI: ENABLED — required by org floor policy (modelarmor.floorSetting).
+    # Models sometimes cite URLs in explanations; if this causes false positives on
+    # legitimate responses, raise a floor policy exception via the org MA admin.
     malicious_uri_filter_settings {
-      filter_enforcement = "DISABLED"
+      filter_enforcement = "ENABLED"
     }
-    # RAI: MEDIUM threshold on responses — catches harmful output without over-blocking
+    # RAI: LOW_AND_ABOVE threshold on responses — catches genuinely harmful output
+    # without over-blocking. Lower than prompt screening (HIGH) because model output
+    # has already passed Gemini built-in safety filters.
     rai_settings {
       rai_filters {
         filter_type      = "HATE_SPEECH"
