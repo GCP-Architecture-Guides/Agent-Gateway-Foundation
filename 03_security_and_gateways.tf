@@ -188,19 +188,19 @@ resource "google_model_armor_template" "security_responses" {
     rai_settings {
       rai_filters {
         filter_type      = "HATE_SPEECH"
-        confidence_level = "MEDIUM"
+        confidence_level = "LOW_AND_ABOVE"
       }
       rai_filters {
         filter_type      = "HARASSMENT"
-        confidence_level = "MEDIUM"
+        confidence_level = "LOW_AND_ABOVE"
       }
       rai_filters {
         filter_type      = "SEXUALLY_EXPLICIT"
-        confidence_level = "MEDIUM"
+        confidence_level = "LOW_AND_ABOVE"
       }
       rai_filters {
         filter_type      = "DANGEROUS"
-        confidence_level = "MEDIUM"
+        confidence_level = "LOW_AND_ABOVE"
       }
     }
   }
