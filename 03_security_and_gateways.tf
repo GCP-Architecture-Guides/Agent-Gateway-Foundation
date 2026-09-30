@@ -180,7 +180,7 @@ resource "google_model_armor_template" "security_responses" {
     # least-restrictive compliant setting.
     pi_and_jailbreak_filter_settings {
       filter_enforcement = "ENABLED"
-      confidence_level   = "LOW"
+      confidence_level   = "MEDIUM_AND_ABOVE"
     }
     # SDP: catch PII leakage in model output (e.g. SSN, API keys in generated text)
     sdp_settings {
