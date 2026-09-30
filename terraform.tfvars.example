@@ -46,30 +46,36 @@ agent_team       = "sec_ops"
 # EGRESS GATEWAY CONFIGURATION
 # =========================================================================
 # Hosts the agent is allowed to call via PSC egress routing.
-# Hosts NOT in this list → gateway drops connection (deny-by-default).
-# REQUIRED: aiplatform.googleapis.com and telemetry.googleapis.com
+# Hosts NOT in the combined list -> gateway drops connection (deny-by-default).
+#
+# FOUNDATION DEFAULTS (automatically registered -- do NOT add these here):
+#   The following 12 hosts are always registered by 07_agent_registry.tf:
+#     aiplatform.googleapis.com, <region>-aiplatform.googleapis.com,
+#     iamcredentials.googleapis.com, oauth2.googleapis.com,
+#     cloudresourcemanager.googleapis.com, logging.googleapis.com,
+#     cloudtrace.googleapis.com, monitoring.googleapis.com,
+#     storage.googleapis.com, secretmanager.googleapis.com,
+#     agentregistry.googleapis.com, telemetry.googleapis.com
+#
+# PROJECT-SPECIFIC HOSTS (add only what your agent calls beyond the defaults):
 allowed_egress_hosts = [
-  "cloudasset.googleapis.com",
-  "logging.googleapis.com",
-  "cloudresourcemanager.googleapis.com",
-  "cloudresourcemanager.mtls.googleapis.com",
-  "storage.googleapis.com",
-  "cloudtrace.googleapis.com",
-  "discoveryengine.googleapis.com",
+  # ---- Reference / documentation APIs (food-court demo) ----
   "github.com",
   "api.github.com",
   "raw.githubusercontent.com",
-  "www.googleapis.com",
-  "docs.cloud.google.com",
   "www.google.com",
-  "iamcredentials.googleapis.com",
-  "oauth2.googleapis.com",
-  "secretmanager.googleapis.com",
-  "terraform.io",
-  "aiplatform.googleapis.com",
-  "telemetry.googleapis.com"
-]
+  "docs.cloud.google.com",
 
+  # ---- GCP APIs beyond foundation defaults (add as needed) ----
+  "cloudasset.googleapis.com",
+  "discoveryengine.googleapis.com",
+  "cloudresourcemanager.mtls.googleapis.com",
+  "www.googleapis.com",
+
+  # ---- Project-specific tool APIs (customize per project) ----
+  # "api.example.com",
+  # "hooks.slack.com",
+]
 # =========================================================================
 # OBSERVABILITY ALERTS (OPTIONAL)
 # =========================================================================

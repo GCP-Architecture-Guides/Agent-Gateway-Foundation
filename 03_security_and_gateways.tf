@@ -87,26 +87,48 @@ resource "google_data_loss_prevention_deidentify_template" "deidentify_template"
 }
 
 # --- Model Armor Templates ---
+#
+# TWO templates — one per screening direction:
+#   Template 1: security-high       — USER PROMPTS  (ingress request + egress outbound tool calls)
+#   Template 2: security-responses  — MODEL RESPONSES (egress response side only)
+#
+# WHY separate templates for responses?
+#   The egress gateway screens BOTH the outbound request (tool call to Vertex AI) AND
+#   the inbound response (LLM output returning to the agent). These have different risk
+#   profiles and different false-positive characteristics:
+#     - Prompt Injection / Jailbreak: DISABLED on responses. LLM outputs don't contain
+#       injected prompts. The gRPC-HTTP transcoding wrapper on :streamQuery responses
+#       includes metadata fields (contentType, extensions) that falsely trigger the PI
+#       filter, causing valid responses to be blocked.
+#     - RAI + PII: ENABLED on responses (MEDIUM threshold). Catches harmful content or
+#       accidental PII leakage in model output.
+#     - Malicious URIs: DISABLED on responses — models sometimes reference URLs in
+#       explanatory text; flagging these as malicious causes too many false positives.
+
 resource "google_model_armor_template" "security_high" {
-  template_id = "security-high"
-  location    = var.location
-  project     = var.project_id
-  depends_on  = [google_project_service.modelarmor, google_data_loss_prevention_inspect_template.identification_template, google_data_loss_prevention_deidentify_template.deidentify_template]
+  template_id  = "security-high"
+  location     = var.location
+  project      = var.project_id
+  depends_on   = [google_project_service.modelarmor, google_data_loss_prevention_inspect_template.identification_template, google_data_loss_prevention_deidentify_template.deidentify_template]
 
   filter_config {
+    # PI/Jailbreak: HIGH — aggressive prompt injection detection on user input
     pi_and_jailbreak_filter_settings {
       filter_enforcement = "ENABLED"
-      confidence_level   = "HIGH" # Applied to USER prompts only (request_template_id)
+      confidence_level   = "HIGH"
     }
+    # SDP: DLP inspect + deidentify to catch/redact PII in user prompts
     sdp_settings {
       advanced_config {
         inspect_template    = google_data_loss_prevention_inspect_template.identification_template.id
         deidentify_template = google_data_loss_prevention_deidentify_template.deidentify_template.id
       }
     }
+    # Block malicious URLs embedded in prompts
     malicious_uri_filter_settings {
       filter_enforcement = "ENABLED"
     }
+    # RAI: HIGH threshold on user prompts — reject harmful input early
     rai_settings {
       rai_filters {
         filter_type      = "HATE_SPEECH"
@@ -132,11 +154,72 @@ resource "google_model_armor_template" "security_high" {
   }
 }
 
+# Template 2: security-responses — MODEL RESPONSES (egress response_template_id only)
+# Lighter than security-high: RAI + PII screening only.
+#   PI/Jailbreak DISABLED — LLM outputs don't contain injected prompts; enabling it
+#     causes false positives on gRPC transcoding metadata in :streamQuery responses.
+#   Malicious URI DISABLED — models legitimately reference URLs in explanations;
+#     flagging them causes too many false positives on valid responses.
+#   RAI MEDIUM — catches genuinely harmful model outputs without over-blocking.
+#   SDP — catches PII accidentally leaked in model responses.
+resource "google_model_armor_template" "security_responses" {
+  template_id  = "security-responses"
+  location     = var.location
+  project      = var.project_id
+  depends_on   = [google_project_service.modelarmor, google_data_loss_prevention_inspect_template.identification_template, google_data_loss_prevention_deidentify_template.deidentify_template]
+
+  filter_config {
+    # PI/Jailbreak: DISABLED on responses — avoids gRPC transcoding false positives
+    pi_and_jailbreak_filter_settings {
+      filter_enforcement = "DISABLED"
+    }
+    # SDP: catch PII leakage in model output (e.g. SSN, API keys in generated text)
+    sdp_settings {
+      advanced_config {
+        inspect_template    = google_data_loss_prevention_inspect_template.identification_template.id
+        deidentify_template = google_data_loss_prevention_deidentify_template.deidentify_template.id
+      }
+    }
+    # Malicious URI: DISABLED on responses (too many false positives on model-cited URLs)
+    malicious_uri_filter_settings {
+      filter_enforcement = "DISABLED"
+    }
+    # RAI: MEDIUM threshold on responses — catches harmful output without over-blocking
+    rai_settings {
+      rai_filters {
+        filter_type      = "HATE_SPEECH"
+        confidence_level = "MEDIUM"
+      }
+      rai_filters {
+        filter_type      = "HARASSMENT"
+        confidence_level = "MEDIUM"
+      }
+      rai_filters {
+        filter_type      = "SEXUALLY_EXPLICIT"
+        confidence_level = "MEDIUM"
+      }
+      rai_filters {
+        filter_type      = "DANGEROUS"
+        confidence_level = "MEDIUM"
+      }
+    }
+  }
+  template_metadata {
+    log_sanitize_operations = true
+    log_template_operations = true
+  }
+}
+
 # --- Authz Extensions ---
 #
 # Two separate MA extensions per official docs (delegate-authorization#configure-authz-ma):
 #   Ingress: fail_open = false (fail-closed) — deny inbound if MA unreachable
 #   Egress:  fail_open = true  (fail-open)  — allow egress through if MA unreachable
+#
+# Template assignment:
+#   Ingress extension  → request_template_id: security-high        (prompt screening only)
+#   Egress  extension  → request_template_id: security-high        (outbound tool calls)
+#                        response_template_id: security-responses   (LLM response screening)
 #
 # WHY two extensions: a single fail-closed extension on egress would silently drop
 # all cross-RE gRPC responses if MA experiences any transient error. fail-open on
@@ -179,13 +262,23 @@ resource "google_network_services_authz_extension" "ma_extension_egress" {
   metadata = {
     model_armor_settings = jsonencode([
       {
-        # INPUT screening only (see ingress extension comment above for rationale).
-        request_template_id = google_model_armor_template.security_high.id
+        # DUAL screening on egress:
+        #   request_template_id  → screens outbound tool calls / requests to Vertex AI
+        #                          (PI/Jailbreak + SDP + RAI + malicious URIs — security-high)
+        #   response_template_id → screens LLM responses returning to the agent
+        #                          (RAI + PII only — security-responses; PI/Jailbreak
+        #                           disabled to avoid gRPC transcoding false positives)
+        request_template_id  = google_model_armor_template.security_high.id
+        response_template_id = google_model_armor_template.security_responses.id
       }
     ])
   }
 
-  depends_on = [google_project_service.networkservices, google_model_armor_template.security_high]
+  depends_on = [
+    google_project_service.networkservices,
+    google_model_armor_template.security_high,
+    google_model_armor_template.security_responses,
+  ]
 }
 
 

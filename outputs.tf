@@ -105,7 +105,7 @@ output "egress_sgp_policy_id" {
 
 # --- Agent Registry ---
 output "registered_egress_endpoints" {
-  value       = { for host, sid in local.egress_host_ids : host => sid }
+  value       = { for host, sid in local.all_egress_host_ids : host => sid }
   description = "Map of hostname → Agent Registry service_id for all hosts registered from allowed_egress_hosts."
 }
 
